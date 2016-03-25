@@ -1,23 +1,26 @@
 #!/usr/bin/python
 import git
 
-class Parser(object):
+class GitParser(object):
 
 	def __init__(self, repoPath):
 		self.repo = git.Repo(repoPath)
 
 
-	def collectObjects(repoPath):
-		pass
+	def collectObjects(self, commit):
+		files = []
+		for i in self.repo.commit(commit).tree.traverse():
+			files.append(str(i.name))
+		
+		return files
 
 
 def main():
 
 	repoPath = raw_input("Repository path: ").strip()
 
-	parser = Parser(repoPath)
-
-
+	parser = GitParser(repoPath)
+	allFiles = parser.collectObjects('master')
 
 
 
