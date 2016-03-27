@@ -17,6 +17,7 @@ class GitParser(object):
 		
 		return files
 
+
 class CParser(object):
 
 	def __init__(self):
@@ -26,21 +27,25 @@ class CParser(object):
 	def parse(cls, filePath):
 		index = clang.cindex.Index.create()
 		tu = index.parse(filePath)
-		print tu
-
-
+		CParser.traverse(tu.cursor)
+		
+	@classmethod
+	def traverse(cls, node, indent=""):
+		print "%s%s, %s" %(indent, node.kind, node.displayname)
+		for c in node.get_children():
+			CParser.traverse(c, indent+"\t")
 
 
 def main():
-
-	# repoPath = raw_input("Repository path: ").strip()
-
-	# parser = GitParser(repoPath)
-	# allFiles = parser.collectObjects('master')
-
-
 	clang.cindex.Config.set_library_file(find_library('clang'))
-	CParser.parse("test.cpp")
+	repoPath = raw_input("Repository path: ").strip()
+
+	parser = GitParser(repoPath)
+	allFiles = parser.collectObjects('master')
+
+	for file in allFiles:
+		if ".cpp" in file or ".c" in file:
+			CParser.parse(file)
 
 
 
