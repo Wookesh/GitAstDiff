@@ -3,6 +3,7 @@ import git
 import clang.cindex
 import argparse
 from ctypes.util import find_library
+import os
 
 class Object(object):
 
@@ -77,7 +78,7 @@ def main():
 	for file in allFiles:
 		if ".cpp" in file or ".c" in file:
 			print "Parsing %s" % file
-			functions, classes = CParser(file).parse()
+			functions, classes = CParser(os.path.join(args.path, file)).parse()
 
 			print "Functions:"
 			for fun in functions:
