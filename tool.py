@@ -27,22 +27,29 @@ class Function(Object):
 # Parsers
 
 class GitParser(object):
+
+	__workFilePath = '/tmp/GDIworkFile%s'
+
 	def __init__(self, repoPath):
+		self.repoPath = repoPath
 		self.repo = git.Repo(repoPath)
 
 
-	def collectObjects(self, commit):
-		files = []
-		for i in self.repo.commit(commit).tree.traverse():
-			files.append(str(i.name))
-		
-		return files
+	def collectObjects(self, revision):
+		for i in self.repo.commit(revision).tree.traverse():
+			originalFilePath = os.path.relpath(i.abspath, self.repoPath)
+			basename, ext = os.path.splitext(originalFilePath)
+			if ext in ['.cpp', '.c', '.cxx']:
+				with open(GitParser.__workFilePath % ext, 'w') as workFile:
+					workFile.write(self.repo.git.show('%s:%s' % (revision, originalFilePath)))
+				yield originalFilePath, GitParser.__workFilePath % ext
+
 
 class CParser(object):
 
 	def __init__(self, filePath):
 		self.filePath = filePath
-		self.file = open(filePath)
+		self.file = open(filePath, 'r')
 		self.functions = []
 		self.classes = []
 
@@ -50,6 +57,7 @@ class CParser(object):
 		index = clang.cindex.Index.create()
 		tu = index.parse(self.filePath)
 		self.traverse(tu.cursor)
+		self.file.close()
 		return self.functions, self.classes
 		
 	def traverse(self, node, indent=""):
@@ -64,7 +72,8 @@ def getArgs():
 	parser = argparse.ArgumentParser(description='Git Diff Improved')
 	parser.add_argument('path', metavar='path', help='path to repo with c/c++ code')
 	parser.add_argument('branch', metavar='branch', help='branch/tag name of repo to parse')
-	return parser.parse_args()
+	args = parser.parse_args()
+	return args
 
 
 # execute
@@ -73,20 +82,20 @@ def main():
 	args = getArgs()
 	clang.cindex.Config.set_library_file(find_library('clang'))
 	parser = GitParser(args.path)
-	allFiles = parser.collectObjects(args.branch)
 
-	for file in allFiles:
-		if ".cpp" in file or ".c" in file:
-			print "Parsing %s" % file
-			functions, classes = CParser(os.path.join(args.path, file)).parse()
+	for file, tmpFile in parser.collectObjects(args.branch):
+		print "Parsing %s" % file
+		functions, classes = CParser(tmpFile).parse()
 
-			print "Functions:"
-			for fun in functions:
-				print fun.text
+		print "#########################################"
+		print "Functions:"
+		for fun in functions:
+			print fun.text
 
-			print "Classes:"
-			for cls in classes:
-				print cls.text
+		print "#########################################"
+		print "Classes:"
+		for cls in classes:
+			print cls.text
 
 
 if __name__ == '__main__':
