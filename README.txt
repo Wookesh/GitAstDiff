@@ -5,7 +5,8 @@ setup:
 	pip install -r req.txt
 
 usage:
-	./tool.py path_to_repo branch_name
+	to list all functions from specific branch use:
+	$ ./tool.py path_to_repo branch_name
 
 use -h option for help
 
