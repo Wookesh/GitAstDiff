@@ -175,8 +175,6 @@ def main():
 				storage.add(function, revision)
 
 	print storage.data
-	for x in xrange(0,100000):
-		utils.screen(x)
 
 if __name__ == '__main__':
 	main()
