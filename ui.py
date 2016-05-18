@@ -1,5 +1,6 @@
 import curses
 import time
+import textwrap
 
 class MenuOption(object):
 
@@ -40,14 +41,20 @@ class DiffViewer(UIObject):
 		self.functionHistory = None
 		self.columnSize = 80
 		self.position = None
-		self.window1 = curses.newwin(40,80,0,0)
-		self.window2 = curses.newwin(40,80,0,80)
+		self.height, self.width = stdscr.getmaxyx()
+		self.window1 = curses.newwin(self.height, self.width / 2, 0, 0)
+		self.window2 = curses.newwin(self.height, self.width / 2, 0, self.width / 2)
 
 	def __show(self, window, function):
 		window.clear()
 		if function is not None:
 			window.addstr(0, 0, str(function.revision))
-			window.addstr(1, 0, function.function.show())
+			lines = []
+			for line in function.function.show().split('\n'):
+				lines += textwrap.wrap(line, self.width / 2)
+			# text = textwrap.wrap(function.function.show(), self.width / 2)
+			for i in xrange(0, min(len(lines), self.height - 1)):
+				window.addstr(i + 1, 0, lines[i])
 		window.refresh()
 
 	def show(self):
