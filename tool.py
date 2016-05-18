@@ -4,7 +4,7 @@ import clang.cindex
 import argparse
 from ctypes.util import find_library
 import os
-import utils
+import ui
 
 clang.cindex.Config.set_library_file(find_library('clang'))
 
@@ -56,7 +56,7 @@ class GitParser(object):
 			basename, ext = os.path.splitext(originalFilePath)
 			if ext in ['.cpp', '.c', '.cxx']:
 				with open(GitParser.__workFilePath % ext, 'w') as workFile:
-					workFile.write(self.repo.git.show('%s:%s' % (revision, originalFilePath)))
+					workFile.write(self.repo.git.show('%s:%s' % (revision, originalFilePath)).encode('utf-8'))
 				yield originalFilePath, GitParser.__workFilePath % ext
 
 	def getRevisions(self, branch):
@@ -71,7 +71,7 @@ class GitParser(object):
 			visited.add(rev)
 			history.append(rev)
 			queue += rev.parents
-		return history
+		return reversed(history)
 
 
 class CParser(object):
@@ -89,26 +89,27 @@ class CParser(object):
 		self.file.close()
 		return self.functions, self.classes
 		
-	def traverse(self, node, indent=""):
-		if node.kind in [clang.cindex.CursorKind.FUNCTION_DECL, clang.cindex.CursorKind.CONSTRUCTOR, clang.cindex.CursorKind.CXX_METHOD]:
+	def traverse(self, node, ident=""):
+		if node.kind in [clang.cindex.CursorKind.FUNCTION_DECL, clang.cindex.CursorKind.CONSTRUCTOR, clang.cindex.CursorKind.CXX_METHOD] and node.is_definition():
 			self.functions.append(Function(node, self.file))
 		# elif node.kind == clang.cindex.CursorKind.CLASS_DECL:
 		# 	self.classes.append(Function(node, self.file))
-		for c in node.get_children():
-			self.traverse(c, indent+"\t")
+		for children in node.get_children():
+			self.traverse(children, ident+"\t")
 
 
 class History(object):
 
 	class Element(object):
 
-		def __init__(self, function, revision, following=None):
+		def __init__(self, function, revision, parent=None, child=None):
 			self.function = function
 			self.revision = revision
-			self.following = following
+			self.parent = parent
+			self.child = child
 
-		def next(self):
-			return self.following
+		def setChild(self, child):
+			self.child = child
 
 		def __repr__(self):
 			return "%s:%s\n" % (self.revision, self.function.name)
@@ -121,10 +122,14 @@ class History(object):
 	def insert(self, function, revision, after=None):
 		if revision not in self.data:
 			elem = History.Element(function, revision, self.head)
+			if self.head is not None:
+				self.head.setChild(elem)
 			self.data[revision] = elem
 			self.head = elem
 		else:
-			raise Exception('failed when trying to add %s:%s for %s' % (revision, self.data, self.function))
+			pass
+			# print self.data
+			# raise Exception('failed when trying to add %s:%s for %s' % (revision, self.data, self.function.name))
 
 	def getRev(self, revision):
 		if revision in tree:
@@ -136,7 +141,7 @@ class History(object):
 		elem = self.head
 		while elem is not None:
 			string += str(elem)
-			elem = elem.following
+			elem = elem.parent
 		return string
 
 
@@ -165,16 +170,18 @@ def main():
 	args = getArgs()
 	parser = GitParser(args.path)
 
+
 	for revision in parser.getRevisions(args.branch):
 		for file, tmpFile in parser.collectObjects(revision):
-			print "Parsing %s" % file
+			# print "Parsing %s" % file
 			functions, classes = CParser(tmpFile).parse()
 			
 			for function in functions:
-				print function.show()
+				# print function.show()
 				storage.add(function, revision)
 
-	print storage.data
+	ui.run(storage)
+
 
 if __name__ == '__main__':
 	main()
