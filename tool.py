@@ -6,7 +6,7 @@ from ctypes.util import find_library
 import os
 import ui
 
-clang.cindex.Config.set_library_file(find_library('clang'))
+clang.cindex.Config.set_library_file(find_library('clang-3.8'))
 
 
 class Object(object):
