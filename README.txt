@@ -1,8 +1,8 @@
 required:
-	clang 3.4 (3.4 is default version in Ubuntu 14.04 distribution)
+	clang 3.8 (3.8 is default version in Ubuntu 16.04 distribution)
 
 setup:
-	pip install -r req.txt
+	./run.sh - this script installs pip, virtualenv and clang. Then instals all pip requirements
 
 usage:
 	to list all functions from specific branch use:
