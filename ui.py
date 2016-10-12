@@ -1,6 +1,8 @@
 import curses
 import time
 import textwrap
+import traceback
+import sys
 
 class MenuOption(object):
 
@@ -38,6 +40,10 @@ class UIObject(object):
 class DiffViewer(UIObject):
 
 	def __init__(self):
+		curses.start_color()
+		curses.use_default_colors()
+		for i in range(0, curses.COLORS):
+			curses.init_pair(i, i, -1)
 		self.functionHistory = None
 		self.columnSize = 80
 		self.position = None
@@ -52,14 +58,27 @@ class DiffViewer(UIObject):
 			lines = []
 			for line in function.function.show().split('\n'):
 				lines += textwrap.wrap(line, self.width / 2)
-			# text = textwrap.wrap(function.function.show(), self.width / 2)
 			for i in xrange(0, min(len(lines), self.height - 1)):
 				window.addstr(i + 1, 0, lines[i])
 		window.refresh()
 
+	def __show2(self, window, function):
+		window.clear()
+		if function is not None:
+			parent = function.parent.function if function.parent is not None else None
+			window.addstr(0, 0, str(function.revision))
+			lines = []
+			for color, line in function.function.diff(parent):
+				for l in textwrap.wrap(line, self.width):
+					lines.append((color, l))
+			for i in xrange(0, min(len(lines), self.height - 1)):
+				color, line = lines[i]
+				window.addstr(i + 1, 0, line, curses.color_pair(color))
+		window.refresh()
+
 	def show(self):
-		self.__show(self.window1, self.position)
-		self.__show(self.window2, self.position.parent)
+		self.__show2(self.window1, self.position)
+		# self.__show2(self.window2, self.position)
 		#self.__showGit()
 
 	def reset(self):
@@ -162,8 +181,8 @@ def run(storage):
 			options.append(FunctionOption(function, fName, diffViewer))
 		MainMenu = Menu(options)
 		MainMenu.run()
-	except Exception, e:
-		raise e
+	except Exception:
+		raise
 	finally:
 		curses.nocbreak(); stdscr.keypad(0); curses.echo()
 		curses.endwin()
