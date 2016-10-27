@@ -15,6 +15,11 @@ class Color(object):
 	Removed = 3
 	Differ  = 4
 
+class Mode():
+	Both = 0
+	New = 1
+	Old = 2
+
 
 def findDiff(old, new):
 
@@ -59,6 +64,20 @@ def printDiff(C, X, Y, i, j):
 			printDiff(C, X, Y, i-1, j)
 			print "- " + X[i-1]
 
+
+def getDiffSite(C, X, Y, i, j, diff, mode=Mode.Both):
+	if i > 0 and j > 0 and X[i-1] == Y[j-1]:
+		getDiffSite(C, X, Y, i-1, j-1, diff, mode)
+		diff.append((0, X[i-1]))
+	else:
+		if j > 0 and (i == 0 or C[i][j-1] >= C[i-1][j]):
+			getDiffSite(C, X, Y, i, j-1, diff, mode)
+			if mode in [Mode.Both, Mode.New]:
+				diff.append((2, Y[j-1]))
+		elif i > 0 and (j == 0 or C[i][j-1] < C[i-1][j]):
+			getDiffSite(C, X, Y, i-1, j, diff, mode)
+			if mode in [Mode.Both, Mode.Old]:
+				diff.append((1, X[i-1]))
 
 
 def getDiff(C, X, Y, i, j, diff):
@@ -105,12 +124,12 @@ class Object(object):
 		# TODO: Improve
 		return self.name
 
-	def diff(self, other):
+	def diff(self, other, mode):
 		diff = []
 		Y = self.text.split('\n')
 		X = other.text.split('\n') if other is not None else []
 		C = LCS(X, Y)
-		getDiff(C, X, Y, len(X), len(Y), diff)
+		getDiffSite(C, X, Y, len(X), len(Y), diff, mode)
 		return diff
 
 class Class(Object):

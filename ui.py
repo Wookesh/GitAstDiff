@@ -3,6 +3,7 @@ import time
 import textwrap
 import traceback
 import sys
+import tool
 
 class MenuOption(object):
 
@@ -62,13 +63,13 @@ class DiffViewer(UIObject):
 				window.addstr(i + 1, 0, lines[i])
 		window.refresh()
 
-	def __show2(self, window, function):
+	def __show2(self, window, function, mode):
 		window.clear()
-		if function is not None:
+		if function is not None and (mode == tool.Mode.New or function.parent is not None):
 			parent = function.parent.function if function.parent is not None else None
-			window.addstr(0, 0, str(function.revision))
+			window.addstr(0, 0, str(self.position.revision if mode == tool.Mode.New else self.position.parent.revision))
 			lines = []
-			for color, line in function.function.diff(parent):
+			for color, line in function.function.diff(parent, mode):
 				for l in textwrap.wrap(line, self.width):
 					lines.append((color, l))
 			for i in xrange(0, min(len(lines), self.height - 1)):
@@ -76,9 +77,13 @@ class DiffViewer(UIObject):
 				window.addstr(i + 1, 0, line, curses.color_pair(color))
 		window.refresh()
 
+	def __showGit(currentRevision):
+		pass
+
+
 	def show(self):
-		self.__show2(self.window1, self.position)
-		# self.__show2(self.window2, self.position)
+		self.__show2(self.window1, self.position, tool.Mode.Old)
+		self.__show2(self.window2, self.position, tool.Mode.New)
 		#self.__showGit()
 
 	def reset(self):
