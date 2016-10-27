@@ -65,32 +65,19 @@ def printDiff(C, X, Y, i, j):
 			print "- " + X[i-1]
 
 
-def getDiffSite(C, X, Y, i, j, diff, mode=Mode.Both):
+def getDiff(C, X, Y, i, j, diff, mode=Mode.Both):
 	if i > 0 and j > 0 and X[i-1] == Y[j-1]:
-		getDiffSite(C, X, Y, i-1, j-1, diff, mode)
+		getDiff(C, X, Y, i-1, j-1, diff, mode)
 		diff.append((0, X[i-1]))
 	else:
 		if j > 0 and (i == 0 or C[i][j-1] >= C[i-1][j]):
-			getDiffSite(C, X, Y, i, j-1, diff, mode)
+			getDiff(C, X, Y, i, j-1, diff, mode)
 			if mode in [Mode.Both, Mode.New]:
 				diff.append((2, Y[j-1]))
 		elif i > 0 and (j == 0 or C[i][j-1] < C[i-1][j]):
-			getDiffSite(C, X, Y, i-1, j, diff, mode)
+			getDiff(C, X, Y, i-1, j, diff, mode)
 			if mode in [Mode.Both, Mode.Old]:
 				diff.append((1, X[i-1]))
-
-
-def getDiff(C, X, Y, i, j, diff):
-	if i > 0 and j > 0 and X[i-1] == Y[j-1]:
-		getDiff(C, X, Y, i-1, j-1, diff)
-		diff.append((0, X[i-1]))
-	else:
-		if j > 0 and (i == 0 or C[i][j-1] >= C[i-1][j]):
-			getDiff(C, X, Y, i, j-1, diff)
-			diff.append((2, Y[j-1]))
-		elif i > 0 and (j == 0 or C[i][j-1] < C[i-1][j]):
-			getDiff(C, X, Y, i-1, j, diff)
-			diff.append((1, X[i-1]))
 
 
 def desc(node, tab=""):
@@ -129,7 +116,7 @@ class Object(object):
 		Y = self.text.split('\n')
 		X = other.text.split('\n') if other is not None else []
 		C = LCS(X, Y)
-		getDiffSite(C, X, Y, len(X), len(Y), diff, mode)
+		getDiff(C, X, Y, len(X), len(Y), diff, mode)
 		return diff
 
 class Class(Object):
