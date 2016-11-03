@@ -1,9 +1,10 @@
 import curses
 import time
 import textwrap
-import traceback
-import sys
 import tool
+import logging
+
+logging.basicConfig(filename='tool.log',level=logging.DEBUG)
 
 class MenuOption(object):
 
@@ -48,9 +49,13 @@ class DiffViewer(UIObject):
 		self.functionHistory = None
 		self.columnSize = 80
 		self.position = None
+
+		self.gitBarHeight = 10
+
 		self.height, self.width = stdscr.getmaxyx()
-		self.window1 = curses.newwin(self.height, self.width / 2, 0, 0)
-		self.window2 = curses.newwin(self.height, self.width / 2, 0, self.width / 2)
+		self.window1 = curses.newwin(self.height - self.gitBarHeight, self.width / 2, self.gitBarHeight, 0)
+		self.window2 = curses.newwin(self.height - self.gitBarHeight, self.width / 2, self.gitBarHeight, self.width / 2)
+		self.gitWindow = curses.newwin(self.gitBarHeight, self.width, 0, 0)
 
 	def __show(self, window, function):
 		window.clear()
@@ -72,19 +77,40 @@ class DiffViewer(UIObject):
 			for color, line in function.function.diff(parent, mode):
 				for l in textwrap.wrap(line, self.width):
 					lines.append((color, l))
-			for i in xrange(0, min(len(lines), self.height - 1)):
+			for i in xrange(0, min(len(lines), self.height - self.gitBarHeight - 1)):
 				color, line = lines[i]
 				window.addstr(i + 1, 0, line, curses.color_pair(color))
 		window.refresh()
 
-	def __showGit(currentRevision):
-		pass
-
+	def __showGit(self, currentRevision):
+		self.gitWindow.clear()
+		mid = list()
+		rev = self.functionHistory.head
+		comment = currentRevision.revision.summary
+		author = currentRevision.revision.author.name + " " + currentRevision.revision.author.email
+		while rev.parent is not None:
+			if rev == currentRevision:
+				mid.append('O')
+			else:
+				mid.append('*')
+			mid.append('-')
+			rev = rev.parent
+		if rev == currentRevision:
+			mid.append('O')
+		else:
+			mid.append('*')
+		string = ""
+		for elem in reversed(mid):
+			string += elem
+		self.gitWindow.addstr(1, 0 , string)
+		self.gitWindow.addstr(3, 0, comment)
+		self.gitWindow.addstr(4, 0, author)
+		self.gitWindow.refresh()
 
 	def show(self):
 		self.__show2(self.window1, self.position, tool.Mode.Old)
 		self.__show2(self.window2, self.position, tool.Mode.New)
-		#self.__showGit()
+		self.__showGit(self.position)
 
 	def reset(self):
 		self.functionHistory = None

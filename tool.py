@@ -250,12 +250,12 @@ def getArgs():
 	parser = argparse.ArgumentParser(description='Git Diff Improved')
 	parser.add_argument('path', metavar='path', help='path to repo with c/c++ code')
 	parser.add_argument('branch', metavar='branch', help='branch/tag name of repo to parse')
-	args = parser.parse_args()
-	return args
+
+	return parser.parse_args()
 
 # execute
 
-def createStore(path, branch):
+def createStore(path, branch='master'):
 	storage = Storage()
 	parser = GitParser(path)
 	for revision in parser.getRevisions(branch):
