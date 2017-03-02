@@ -4,6 +4,10 @@ import textwrap
 import tool
 import logging
 
+import locale
+locale.setlocale(locale.LC_ALL, '')
+code = locale.getpreferredencoding()
+
 logging.basicConfig(filename='tool.log',level=logging.DEBUG)
 
 class MenuOption(object):
@@ -104,7 +108,7 @@ class DiffViewer(UIObject):
 			string += elem
 		self.gitWindow.addstr(1, 0 , string)
 		self.gitWindow.addstr(3, 0, comment)
-		self.gitWindow.addstr(4, 0, author)
+		self.gitWindow.addstr(4, 0, author.encode(code))
 		self.gitWindow.refresh()
 
 	def show(self):
