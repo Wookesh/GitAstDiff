@@ -5,26 +5,35 @@ import argparse
 from ctypes.util import find_library
 import os
 import ui
+import logging
 
-clang.cindex.Config.set_library_file(find_library('clang-3.8'))
+def init():
+	logging.basicConfig(filename="tool.log", level=logging.DEBUG)
+	clang.cindex.Config.set_library_file(find_library('clang-3.8'))
+	logging.info("test")
 
 class Color(object):
-	New	 = 0
-	Changed = 1
-	Same	= 2
-	Removed = 3
-	Differ  = 4
+	Same	= 0
+	Removed = 1
+	New	    = 2
+	Marked  = 3
+	# Differ  = 4
 
 class Mode():
 	Both = 0
-	New = 1
-	Old = 2
+	New  = 1
+	Old  = 2
 
+ModeToColor = {
+	Mode.Both: Color.Same,
+	Mode.New:  Color.New,
+	Mode.Old:  Color.Removed,
+}
 
 def findDiff(old, new):
 
-	new_list = list(old.get_children())
-	old_list = list(new.get_children())
+	new_list = list(old.children)
+	old_list = list(new.children)
 	new_set = set(( e.hash for e in new_list))
 	old_set = set(( e.hash for e in old_list))
 
@@ -82,7 +91,7 @@ def getDiff(C, X, Y, i, j, diff, mode=Mode.Both):
 
 def desc(node, tab=""):
 	print tab, node.kind
-	for i in node.get_children():
+	for i in node.children:
 		desc(i, tab+"\t")
 
 
@@ -92,14 +101,16 @@ class Object(object):
 		self.node = node
 		self.name = node.displayname
 		self._start_offset = node.extent.start.offset
-		sourceFile.seek(node.extent.start.offset)
-		# self._deepTextCopy(node, sourceFile.read())
-		self.text = sourceFile.read(node.extent.end.offset - node.extent.start.offset)
+		# sourceFile.seek(self._start_offset)
+		self.prepare(self.node, sourceFile.read())
+		# self.text = sourceFile.read(node.extent.end.offset - self._start_offset)
 
-	def _deepTextCopy(self, node, sourceText):
+	def prepare(self, node, sourceText):
 		node.text = sourceText[node.extent.start.offset:node.extent.end.offset]
+		node.children = []
 		for child in node.get_children():
-			self._deepTextCopy(child, sourceText)
+			node.children.append(child)
+			self.prepare(child, sourceText)
 
 	def show(self, start=None, stop=None):
 		if start is None and stop is None:
@@ -119,6 +130,7 @@ class Object(object):
 		getDiff(C, X, Y, len(X), len(Y), diff, mode)
 		return diff
 
+
 class Class(Object):
 
 	def __init__(self, node, sourceFile):
@@ -127,8 +139,99 @@ class Class(Object):
 
 class Function(Object):
 
-	def __init__(self, node, sourceFile):
+	def __init__(self, node, sourceFile, declarations, globals):
 		super(Function, self).__init__(node, sourceFile)
+		self.variables = dict()
+		self.declarations = declarations
+		self.globals = globals
+		self.parse()
+
+	def parse(self):
+		self.__parse(self.node, [self.node.kind])
+		self.buildKindMap()
+		# print "Variables:", self.variables
+		# print "Globals:", self.globals
+		# print "Declarations:", self.declarations
+		
+
+	def __parse(self, node, kind_path):
+		kind_path_copy = list(kind_path)
+		kind_path_copy.append(node.kind)
+		# print "\t"*len(kind_path), node.kind, node.displayname
+
+		if node.kind == clang.cindex.CursorKind.DECL_REF_EXPR:
+			if self.variables.get(node.displayname, None) == None:
+				if self.declarations.get(node.displayname, None) == None or self.globals.get(node.displayname, None) == None:
+					# print "UNDEFINED VARIABLE: %s" % (node.displayname)
+					pass
+			else:
+				self.variables[node.displayname].append(kind_path_copy)
+		elif node.kind == clang.cindex.CursorKind.VAR_DECL:
+			self.variables[node.displayname] = list()
+		elif node.kind == clang.cindex.CursorKind.CALL_EXPR:
+			pass
+
+
+		for c in node.children:
+			self.__parse(c, kind_path_copy)
+
+
+	def buildKindMap(self):
+		kindMap = dict()
+		def __buildKindMap(node):
+			if kindMap.get(node.kind, None) == None:
+				kindMap[node.kind] = list()
+			kindMap[node.kind].append(node)
+			for c in node.children:
+				__buildKindMap(c)
+
+		__buildKindMap(self.node)
+		print kindMap, "\n"
+
+		return kindMap
+		
+	def structuralDiff(self, other, mode, changed=False):
+		if mode == Mode.Old and other is not None and changed is False:
+			return other.structuralDiff(self, mode, True)
+
+		result = []
+		for char in self.node.text:
+			result.append((Color.Same, char))
+
+		if other is not None:
+			self.__structuralDiff(self.node, other.node, mode, result, 0)
+		return result
+
+	def __structuralDiff(self, node, other, mode, result, depth):
+		logging.info("%s%s, %s, %s" % ("\t"*depth, node.kind, other.kind, node.text))
+		if node.kind != other.kind or node.displayname != other.displayname:
+			for i in xrange(node.extent.start.offset, node.extent.end.offset):
+				char = node.text[i - node.extent.start.offset]
+				result[i - self._start_offset] = (ModeToColor[mode], char)
+		else:
+			# for n in node.children:
+			# 	o = findBestMatching(other, n)
+			# 	self.__structuralDiff(n, o, mode, result, depth+1)
+
+			for n1, n2 in zip(node.children, other.children):
+				self.__structuralDiff(n1, n2, mode, result, depth+1)
+
+
+def findBestMatching(tree, node):
+	if tree.kind == node.kind:
+		pass
+
+
+# def isLevelSame(a, b):
+# 	a_ch = [c for c in a.children]
+# 	b_ch = [c for c in b.children]
+# 	if len(a_ch) == len(b_ch):
+# 		for i in xrange(0, len(a_ch)):
+# 			if a_ch[i].kind != b_ch[i].kind or a_ch[i].displayname != b_ch[i].displayname:
+# 				return False
+# 		return True
+# 	return False
+
 
 # Parsers
 
@@ -163,14 +266,16 @@ class GitParser(object):
 			queue += rev.parents
 		return reversed(history)
 
-
 class CParser(object):
 
 	def __init__(self, filePath):
 		self.filePath = filePath
 		self.file = open(filePath, 'r')
 		self.functions = []
+		self.namespaces = []
 		self.classes = []
+		self.declarations = dict()
+		self.globals = dict()
 
 	def parse(self):
 		index = clang.cindex.Index.create()
@@ -179,13 +284,25 @@ class CParser(object):
 		self.file.close()
 		return self.functions, self.classes
 		
-	def traverse(self, node, ident=""):
-		if node.kind in [clang.cindex.CursorKind.FUNCTION_DECL, clang.cindex.CursorKind.CONSTRUCTOR, clang.cindex.CursorKind.CXX_METHOD] and node.is_definition():
-			self.functions.append(Function(node, self.file))
+	def traverse(self, node, kind_path=[]):
+		# print "\t"*len(kind_path), node.kind, node.displayname
+		kind_path_copy = list(kind_path)
+		kind_path_copy.append(node.kind)
+		if node.kind in [clang.cindex.CursorKind.FUNCTION_DECL, clang.cindex.CursorKind.CONSTRUCTOR, clang.cindex.CursorKind.CXX_METHOD]:
+			if node.is_definition():
+				self.functions.append(Function(node, self.file, self.declarations, self.globals))
+				return
+			else:
+				self.declarations[node.displayname] = node
+		# elif node.kind in [clang.cindex.CursorKind.NAMESPACE]:
+		# 	print "\t"*len(kind_path), node.kind, node.displayname
+		elif node.kind in [clang.cindex.CursorKind.VAR_DECL] and node.is_definition():
+			# print ident, node.kind, node.displayname
+			self.globals[node.displayname] = list(kind_path_copy)
 		# elif node.kind == clang.cindex.CursorKind.CLASS_DECL:
 		# 	self.classes.append(Function(node, self.file))
 		for children in node.get_children():
-			self.traverse(children, ident+"\t")
+			self.traverse(children, kind_path_copy)
 
 
 class History(object):
@@ -270,6 +387,7 @@ def createStore(path, branch='master'):
 
 
 def main():
+	init()
 	args = getArgs()
 	storage = createStore(args.path, args.branch)
 

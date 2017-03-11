@@ -86,6 +86,26 @@ class DiffViewer(UIObject):
 				window.addstr(i + 1, 0, line, curses.color_pair(color))
 		window.refresh()
 
+	def __show3(self, window, function, mode):
+		window.clear()
+		if function is not None and (mode == tool.Mode.New or function.parent is not None):
+			parent = function.parent.function if function.parent is not None else None
+			window.addstr(0, 0, str(self.position.revision if mode == tool.Mode.New else self.position.parent.revision))
+			window.addch('\n')
+			text = [list()]
+			lastLine = 0
+			for color, letter in function.function.structuralDiff(parent, mode):
+				text[lastLine].append((color, letter))
+				if letter == '\n':
+					lastLine = lastLine + 1
+					text.append(list())
+			for i in xrange(0, min(len(text), self.height - self.gitBarHeight - 1)):
+				line = text[i]
+				for j in xrange(0, len(line)):
+					color, char = line[j]
+					window.addch(char, curses.color_pair(color))
+		window.refresh()
+
 	def __showGit(self, currentRevision):
 		self.gitWindow.clear()
 		mid = list()
@@ -112,8 +132,8 @@ class DiffViewer(UIObject):
 		self.gitWindow.refresh()
 
 	def show(self):
-		self.__show2(self.window1, self.position, tool.Mode.Old)
-		self.__show2(self.window2, self.position, tool.Mode.New)
+		self.__show3(self.window1, self.position, tool.Mode.Old)
+		self.__show3(self.window2, self.position, tool.Mode.New)
 		self.__showGit(self.position)
 
 	def reset(self):
