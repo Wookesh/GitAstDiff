@@ -30,6 +30,21 @@ ModeToColor = {
 	Mode.Old:  Color.Removed,
 }
 
+
+scoreComparitionCache = dict()
+def cacheResult(func):
+	def wrapper(*args, **kwargs):
+		node = kwargs['node']
+		o_node = kwargs['o_node']
+		result = scoreComparitionCache.get(node.hash + '' + o_node.hash, None)
+		if result is None:
+			result = func(args, kwargs)
+			scoreComparitionCache[node.hash + '' + o_node.hash] = result
+			return result
+		return result
+	return wrapper
+
+
 def findDiff(old, new):
 
 	new_list = list(old.children)
@@ -154,10 +169,17 @@ class Function(Object):
 		# print "Declarations:", self.declarations
 		
 
+	def __parse2(self, node, kind_path):
+		kind_path_copy = list(kind_path)
+		kind_path_copy.append(node.kind)
+
+
+
+
 	def __parse(self, node, kind_path):
 		kind_path_copy = list(kind_path)
 		kind_path_copy.append(node.kind)
-		# print "\t"*len(kind_path), node.kind, node.displayname
+		print "\t"*len(kind_path), node.kind, node.displayname
 
 		if node.kind == clang.cindex.CursorKind.DECL_REF_EXPR:
 			if self.variables.get(node.displayname, None) == None:
@@ -177,18 +199,18 @@ class Function(Object):
 
 
 	def buildKindMap(self):
-		kindMap = dict()
-		def __buildKindMap(node):
-			if kindMap.get(node.kind, None) == None:
-				kindMap[node.kind] = list()
-			kindMap[node.kind].append(node)
+		self.kindMap = dict()	
+		def __buildKindMap(node, skip=False):
+			if not skip:
+				if self.kindMap.get(node.kind, None) == None:
+					self.kindMap[node.kind] = list()
+				self.kindMap[node.kind].append(node)
 			for c in node.children:
 				__buildKindMap(c)
 
-		__buildKindMap(self.node)
-		print kindMap, "\n"
+		__buildKindMap(self.node, skip=True)
+		print self.kindMap, "\n"
 
-		return kindMap
 		
 	def structuralDiff(self, other, mode, changed=False):
 		if mode == Mode.Old and other is not None and changed is False:
@@ -199,38 +221,89 @@ class Function(Object):
 			result.append((Color.Same, char))
 
 		if other is not None:
-			self.__structuralDiff(self.node, other.node, mode, result, 0)
+			self.__structuralDiff(self.node, other, other.node, mode, result, 0)
 		return result
 
-	def __structuralDiff(self, node, other, mode, result, depth):
-		logging.info("%s%s, %s, %s" % ("\t"*depth, node.kind, other.kind, node.text))
-		if node.kind != other.kind or node.displayname != other.displayname:
-			for i in xrange(node.extent.start.offset, node.extent.end.offset):
-				char = node.text[i - node.extent.start.offset]
-				result[i - self._start_offset] = (ModeToColor[mode], char)
+	def __structuralDiff(self, node, other, o_node, mode, result, depth):
+		logging.info("%s%s, %s, %s" % ("\t"*depth, node.kind, o_node.kind, node.text))
+		if node.kind != o_node.kind or node.displayname != o_node.displayname:
+			logging.info("%s -- %s" % (node.displayname, o_node.displayname))
+			if len(node.text) > 0:
+				for i in xrange(node.extent.start.offset, node.extent.end.offset):
+					logging.info("%s, %s, %s" % (i, node.extent.start.offset, len(node.text)))
+					char = node.text[i - node.extent.start.offset]
+					result[i - self._start_offset] = (ModeToColor[mode], char)
 		else:
 			# for n in node.children:
-			# 	o = findBestMatching(other, n)
-			# 	self.__structuralDiff(n, o, mode, result, depth+1)
+			# 	o = findBestMatching(other.kindMap, n)
+			# 	logging.info("Proposing:%s" % (o))
+			# 	if o is not None:
+			# 		self.__structuralDiff(n, other, o, mode, result, depth+1)
+			# compareBlock(node, o_node)
 
-			for n1, n2 in zip(node.children, other.children):
-				self.__structuralDiff(n1, n2, mode, result, depth+1)
+			for n1, n2 in zip(node.children, o_node.children):
+				self.__structuralDiff(n1, other, n2, mode, result, depth+1)
 
 
-def findBestMatching(tree, node):
-	if tree.kind == node.kind:
+def findBestMatching(kindMap, node):
+	best = None
+	bestScore = 0
+	for t in kindMap[node.kind]:
+		score = compare(t, node)
+		if score > bestScore:
+			bestScore = score
+			best = t
+
+	return best
+
+def compareStruct(a, b):
+	totalScore = 0.0
+	if a.kind != b.kind:
+		return totalScore
+	totalScore += 1.0
+	for c in a.children:
+		bestScore = 0.0
+		for c_b in b.children:
+			if c.kind == c_b.kind:
+				score = compareStruct(c, c_b)
+				if score > bestScore:
+					bestScore = score
+				totalScore += score
+	return totalScore
+	
+
+def compareBlock(a, b):
+	if a.kind != b.kind or a.kind != clang.cindex.CursorKind.COMPOUND_STMT:
+		return 0.0
+
+	matchedStmt = dict()
+	ids = dict()
+	for stmt in a.children:
+		ids[stmt.hash] = stmt
+		matchedStmt[stmt.hash] = dict()
+		for o_stmt in b.children:
+			ids[o_stmt.hash] = o_stmt
+			score = compareStmts(stmt, o_stmt)
+			matchedStmt[stmt.hash][o_stmt.hash] = score
+			if score == 100.0:
+				break
+
+	for stmt, matched in matchedStmt.iteritems():
+		for o_stmt, score in matched.iteritems():
+			logging.info("MATCHED:%s - %s : %s" % (ids[stmt].text, ids[o_stmt].text, score))
+
+
+def compareStmts(a, b):
+	if a.kind != b.kind:
+		return 0.0
+	if a.text == b.text:
+		return 100.0
+	return 50.0
+
+def comapreForStmts(a, b):
+	for a_aprt, b_part in zip(a.children, b.children):
 		pass
 
-
-# def isLevelSame(a, b):
-# 	a_ch = [c for c in a.children]
-# 	b_ch = [c for c in b.children]
-# 	if len(a_ch) == len(b_ch):
-# 		for i in xrange(0, len(a_ch)):
-# 			if a_ch[i].kind != b_ch[i].kind or a_ch[i].displayname != b_ch[i].displayname:
-# 				return False
-# 		return True
-# 	return False
 
 
 # Parsers
