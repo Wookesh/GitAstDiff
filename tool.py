@@ -6,11 +6,11 @@ from ctypes.util import find_library
 import os
 import ui
 import logging
+import types
 
 def init():
 	logging.basicConfig(filename="tool.log", level=logging.DEBUG)
 	clang.cindex.Config.set_library_file(find_library('clang-3.8'))
-	logging.info("test")
 
 class Color(object):
 	Same	= 0
@@ -117,7 +117,7 @@ class Object(object):
 		self.name = node.displayname
 		self._start_offset = node.extent.start.offset
 		# sourceFile.seek(self._start_offset)
-		self.prepare(self.node, sourceFile.read())
+		self.prepare(self.node, sourceFile)
 		# self.text = sourceFile.read(node.extent.end.offset - self._start_offset)
 
 	def prepare(self, node, sourceText):
@@ -152,6 +152,17 @@ class Class(Object):
 		super(Function, self).__init__(node, sourceFile)
 
 
+def simplehash(self):
+	return self.hash
+
+def eq(self, other):
+	return self.hash == other.hash
+
+def cmd(self, other):
+	return self.hash > other.hash
+
+clang.cindex.Cursor.__hash__ = simplehash
+
 class Function(Object):
 
 	def __init__(self, node, sourceFile, declarations, globals):
@@ -167,13 +178,6 @@ class Function(Object):
 		# print "Variables:", self.variables
 		# print "Globals:", self.globals
 		# print "Declarations:", self.declarations
-		
-
-	def __parse2(self, node, kind_path):
-		kind_path_copy = list(kind_path)
-		kind_path_copy.append(node.kind)
-
-
 
 
 	def __parse(self, node, kind_path):
@@ -181,13 +185,18 @@ class Function(Object):
 		kind_path_copy.append(node.kind)
 		print "\t"*len(kind_path), node.kind, node.displayname
 
+		node.__hash__ = types.MethodType(simplehash, node)
+		node.__eq__ = types.MethodType(eq, node)
+		node.__cmp__ = types.MethodType(cmp, node)
+
 		if node.kind == clang.cindex.CursorKind.DECL_REF_EXPR:
 			if self.variables.get(node.displayname, None) == None:
 				if self.declarations.get(node.displayname, None) == None or self.globals.get(node.displayname, None) == None:
-					# print "UNDEFINED VARIABLE: %s" % (node.displayname)
+					# print "UNDEFINED: %s" % (node.displayname)
 					pass
 			else:
 				self.variables[node.displayname].append(kind_path_copy)
+				self.variables[node.displayname]
 		elif node.kind == clang.cindex.CursorKind.VAR_DECL:
 			self.variables[node.displayname] = list()
 		elif node.kind == clang.cindex.CursorKind.CALL_EXPR:
@@ -214,6 +223,7 @@ class Function(Object):
 		
 	def structuralDiff(self, other, mode, changed=False):
 		if mode == Mode.Old and other is not None and changed is False:
+			logging.info("swapping")
 			return other.structuralDiff(self, mode, True)
 
 		result = []
@@ -221,89 +231,124 @@ class Function(Object):
 			result.append((Color.Same, char))
 
 		if other is not None:
-			self.__structuralDiff(self.node, other, other.node, mode, result, 0)
+			# self.__structuralDiff(self.node, other, other.node, mode, result, 0)
+			self.diff(self.node, other.node, mode, result)
 		return result
 
-	def __structuralDiff(self, node, other, o_node, mode, result, depth):
-		logging.info("%s%s, %s, %s" % ("\t"*depth, node.kind, o_node.kind, node.text))
-		if node.kind != o_node.kind or node.displayname != o_node.displayname:
-			logging.info("%s -- %s" % (node.displayname, o_node.displayname))
-			if len(node.text) > 0:
-				for i in xrange(node.extent.start.offset, node.extent.end.offset):
-					logging.info("%s, %s, %s" % (i, node.extent.start.offset, len(node.text)))
-					char = node.text[i - node.extent.start.offset]
-					result[i - self._start_offset] = (ModeToColor[mode], char)
+
+	def color(self, node, mode, result):
+		if len(node.text) > 0:
+			for i in xrange(node.extent.start.offset, node.extent.end.offset):
+				# logging.info("%s, %s, %s" % (i, node.extent.start.offset, len(node.text)))
+				char = node.text[i - node.extent.start.offset]
+				result[i - self._start_offset] = (ModeToColor[mode], char)
+
+
+	# assume same kind
+	def diffStmts(self, node, other, mode, result):
+		if node.kind == clang.cindex.CursorKind.COMPOUND_STMT:
+			for a, b in matchStmts(node, other).iteritems():
+				if b is None:
+					self.color(a, mode, result)
+				else:
+					self.diffStmts(a, b, mode, result)
+
 		else:
-			# for n in node.children:
-			# 	o = findBestMatching(other.kindMap, n)
-			# 	logging.info("Proposing:%s" % (o))
-			# 	if o is not None:
-			# 		self.__structuralDiff(n, other, o, mode, result, depth+1)
-			# compareBlock(node, o_node)
-
-			for n1, n2 in zip(node.children, o_node.children):
-				self.__structuralDiff(n1, other, n2, mode, result, depth+1)
+			for a, b in zip(node.children, other.children):
+				self.diff(a, b, mode, result)
 
 
-def findBestMatching(kindMap, node):
-	best = None
-	bestScore = 0
-	for t in kindMap[node.kind]:
-		score = compare(t, node)
-		if score > bestScore:
-			bestScore = score
-			best = t
+	def diff(self, node, other, mode, result):
+		if node.kind != other.kind:
+			self.color(node, mode, result)
+			return
+		if clang.cindex.CursorKind.is_statement(node.kind):
+			self.diffStmts(node, other, mode, result)
+		elif clang.cindex.CursorKind.is_expression(node.kind):
+			self.diffExpr(node, other, mode, result)
+		else:
+			self.diffAny(node, other, mode, result)
 
-	return best
+
+	# assume same kind
+	def diffExpr(self, node, other, mode, result):
+		for a, b in zip(node.children, other.children):
+			if a.kind != b.kind:
+				self.color(a, mode, result)
+			elif a.kind == clang.cindex.CursorKind.DECL_REF_EXPR and a.displayname != b.displayname:
+				self.color(a, mode, result)
+			else:
+				self.diff(a, b, mode, result)
+
+
+	def diffAny(self, node, other, mode, result):
+		for a, b in zip(node.children, other.children):
+			if a.kind != b.kind:
+				self.color(a, mode, result)
+			else:
+				self.diff(a, b, mode, result)
+
+
+def matchStmts(node, other):
+	matched = dict()
+	logging.info("MATCHING STATEMENTS STARTED")
+	for c in node.children:
+		possible = dict()
+		for b in other.children:
+			score = compareStruct(c, b)
+			foundbetter = False
+			for k, v in matched.iteritems():
+				s = v.get(b, None)
+				if s is not None:
+					if s < score:
+						v.pop(b)
+					else:
+						foundbetter = True
+			if not foundbetter:
+				possible[b] = score
+		matched[c] = possible
+
+	result = dict()
+	for c, elems in matched.iteritems():
+		best = None
+		bestScore = 0.0
+		for k, v in elems.iteritems():
+			if v >= bestScore:
+				bestScore = v
+				best = k
+		result[c] = best
+
+	for k, v in result.iteritems():
+		if v is not None:
+			logging.info("%s::%s -> %s::%s" % (k.kind, k.text, v.kind, v.text))
+
+	logging.info("MATCHING STATEMENTS FINISHED")
+
+	return result
+
 
 def compareStruct(a, b):
 	totalScore = 0.0
 	if a.kind != b.kind:
 		return totalScore
 	totalScore += 1.0
-	for c in a.children:
-		bestScore = 0.0
-		for c_b in b.children:
-			if c.kind == c_b.kind:
-				score = compareStruct(c, c_b)
-				if score > bestScore:
-					bestScore = score
-				totalScore += score
+	if a.displayname == b.displayname:
+		totalScore += 1.0
+
+	if a.kind == clang.cindex.CursorKind.COMPOUND_STMT:
+		for c in a.children:
+			bestScore = 0.0
+			for c_b in b.children:
+				if c.kind == c_b.kind:
+					score = compareStruct(c, c_b)
+					if score > bestScore:
+						bestScore = score
+					totalScore += score
+	else:
+		for c, c_b in zip(a.children, b.children):
+			totalScore += compareStruct(c, c_b)
+
 	return totalScore
-	
-
-def compareBlock(a, b):
-	if a.kind != b.kind or a.kind != clang.cindex.CursorKind.COMPOUND_STMT:
-		return 0.0
-
-	matchedStmt = dict()
-	ids = dict()
-	for stmt in a.children:
-		ids[stmt.hash] = stmt
-		matchedStmt[stmt.hash] = dict()
-		for o_stmt in b.children:
-			ids[o_stmt.hash] = o_stmt
-			score = compareStmts(stmt, o_stmt)
-			matchedStmt[stmt.hash][o_stmt.hash] = score
-			if score == 100.0:
-				break
-
-	for stmt, matched in matchedStmt.iteritems():
-		for o_stmt, score in matched.iteritems():
-			logging.info("MATCHED:%s - %s : %s" % (ids[stmt].text, ids[o_stmt].text, score))
-
-
-def compareStmts(a, b):
-	if a.kind != b.kind:
-		return 0.0
-	if a.text == b.text:
-		return 100.0
-	return 50.0
-
-def comapreForStmts(a, b):
-	for a_aprt, b_part in zip(a.children, b.children):
-		pass
-
 
 
 # Parsers
@@ -352,6 +397,7 @@ class CParser(object):
 
 	def parse(self):
 		index = clang.cindex.Index.create()
+		self.filetext = self.file.read()
 		tu = index.parse(self.filePath)
 		self.traverse(tu.cursor)
 		self.file.close()
@@ -363,7 +409,7 @@ class CParser(object):
 		kind_path_copy.append(node.kind)
 		if node.kind in [clang.cindex.CursorKind.FUNCTION_DECL, clang.cindex.CursorKind.CONSTRUCTOR, clang.cindex.CursorKind.CXX_METHOD]:
 			if node.is_definition():
-				self.functions.append(Function(node, self.file, self.declarations, self.globals))
+				self.functions.append(Function(node, self.filetext, self.declarations, self.globals))
 				return
 			else:
 				self.declarations[node.displayname] = node
