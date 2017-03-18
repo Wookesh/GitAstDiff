@@ -45,23 +45,6 @@ def cacheResult(func):
 	return wrapper
 
 
-def findDiff(old, new):
-
-	new_list = list(old.children)
-	old_list = list(new.children)
-	new_set = set(( e.hash for e in new_list))
-	old_set = set(( e.hash for e in old_list))
-
-	removed_elems = [e for e in old_list if e not in new_set]
-	new_elems = [e for e in new_list if e not in old_set]
-
-	if len(removed_elems) > 0:
-		print removed_elems
-
-	if len(new_elems) > 0:
-		print new_elems
-
-
 def LCS(X, Y):
 	m = len(X)
 	n = len(Y)
@@ -183,7 +166,7 @@ class Function(Object):
 	def __parse(self, node, kind_path):
 		kind_path_copy = list(kind_path)
 		kind_path_copy.append(node.kind)
-		print "\t"*len(kind_path), node.kind, node.displayname
+		# print "\t"*len(kind_path), node.kind, node.displayname
 
 		node.__hash__ = types.MethodType(simplehash, node)
 		node.__eq__ = types.MethodType(eq, node)
@@ -234,11 +217,19 @@ class Function(Object):
 
 	def matchVariables(self, other):
 		self.variablesMatched = dict()
+
+		for var in self.variables.iterkeys():
+			if var in other.variables:
+				self.variablesMatched[var] = var
+
+
 		for var, positions in self.variables.iteritems():
 			if var not in other.variables:
 				possible = None
 				possible_value = 0.0
 				for new, new_positions in other.variables.iteritems():
+					if new in self.variablesMatched:
+						continue
 
 					similarity_val = comapreVarPositions(positions, new_positions)
 					logging.info("VARSCORE: %s -> %s :: %s" % (var, new, similarity_val))
@@ -258,16 +249,27 @@ class Function(Object):
 
 	# assume same kind
 	def diffStmts(self, node, other, mode, result):
-		if node.kind == ci.CursorKind.COMPOUND_STMT:
-			for a, b in matchStmts(node, other).iteritems():
+		logging.info("diffStmt :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
+		if node.kind in [ci.CursorKind.COMPOUND_STMT]:
+			for a, b in matchStmts2(node, other).iteritems():
 				if b is None:
 					self.color(a, mode, result)
 				else:
 					self.diffStmts(a, b, mode, result)
 
+		# elif node.kind in [ci.CursorKind.DECL_STMT]:
+		# 	pass
 		else:
-			for a, b in zip(node.children, other.children):
+			z = zip(node.children, other.children)
+			# logging.info("%s, %s, %s", len(node.children), len(other.children), len(z))
+			for a, b in z:
+				logging.info("STMT_CHLD %s :: %s" % (a.text, b.text))
 				self.diff(a, b, mode, result)
+			# if len(node.children) > len(z):
+			# 	logging.info("I SHOULD PRINT")
+			# 	for i in xrange(len(z), len(node.children)):
+			# 		logging.info("IF_PART_NOT_FOUND %s" % (node.children[i].kind))
+			# 		self.color(node.children[i], mode, result)
 
 
 	def diff(self, node, other, mode, result):
@@ -284,7 +286,6 @@ class Function(Object):
 			self.diffAny(node, other, mode, result)
 
 
-	# assume same kind
 	def diffExpr(self, node, other, mode, result):
 		logging.info("diffExpr :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
 		if node.kind in [ci.CursorKind.DECL_REF_EXPR]:
@@ -311,23 +312,21 @@ class Function(Object):
 					self.color(node, Mode.Both, result)
 				else:
 					self.color(node, mode, result)
-			else:
-				for a, b in zip(node.children, other.children):
-					self.diff(a, b, mode, result)
+			for a, b in zip(node.children, other.children):
+				self.diff(a, b, mode, result)
 		else:
 			for a, b in zip(node.children, other.children):
 				self.diff(a, b, mode, result)
 
 	def diffAny(self, node, other, mode, result):
 		logging.info("diffAny :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
-		if node.kind != other.kind:
-			self.color(node, mode, result)
-		else:
-			for a, b in zip(node.children, other.children):
-				self.diff(a, b, mode, result)
+		for a, b in zip(node.children, other.children):
+			self.diff(a, b, mode, result)
 
 
 # TODO: fix bug with 2 exactly same statements
+#       find nested
+
 def matchStmts(node, other):
 	matched = dict()
 	for c in node.children:
@@ -366,6 +365,43 @@ def matchStmts(node, other):
 
 	return result
 
+
+def compareTouples((s1, c1, b1), (s2, c2, b2)):
+	return s1 > s2
+
+def matchStmts2(node, other):
+	matched = dict()
+	matchingList = list()
+	for c in node.children:
+		c_size = getSize(c)
+		for b in other.children:
+			if c.kind != b.kind:
+				continue
+			b_size = getSize(b)
+			score = compareStruct(c, b) / max(c_size, b_size)
+			matchingList.append((score, c, b))
+
+	for s, c, b in matchingList:
+		logging.info("MATCH_PROP %s -> %s :: %s" % (c.text, b.text, s))
+
+	matchingList = sorted(matchingList, cmp=compareTouples, reverse=True)
+
+	used = set()
+	for e in matchingList:
+		score, c, b = e
+		if b in used:
+			continue
+		if c in matched:
+			continue
+		logging.info("MATCH_DEC %s -> %s :: %s" % (c.text, b.text, score))
+		used.add(b)
+		matched[c] = b
+
+	for c in node.children:
+		if c not in matched:
+			matched[c] = None
+
+	return matched
 
 def compareStruct(a, b, debug=False):
 	if debug:
@@ -410,6 +446,12 @@ def comapreVarPositions(a, b):
 
 	return score / (len(a) * len(b))
 
+
+def getSize(node):
+	s = 1
+	for c in node.children:
+		s += getSize(c)
+	return s
 
 # Parsers
 
