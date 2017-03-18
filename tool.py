@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 import git
-import clang.cindex
+import clang.cindex as ci
 import argparse
 from ctypes.util import find_library
 import os
@@ -10,7 +10,7 @@ import types
 
 def init():
 	logging.basicConfig(filename="tool.log", level=logging.DEBUG)
-	clang.cindex.Config.set_library_file(find_library('clang-3.8'))
+	ci.Config.set_library_file(find_library('clang-3.8'))
 
 class Color(object):
 	Same	= 0
@@ -161,7 +161,7 @@ def eq(self, other):
 def cmd(self, other):
 	return self.hash > other.hash
 
-clang.cindex.Cursor.__hash__ = simplehash
+ci.Cursor.__hash__ = simplehash
 
 class Function(Object):
 
@@ -174,7 +174,7 @@ class Function(Object):
 
 	def parse(self):
 		self.__parse(self.node, [self.node.kind])
-		self.buildKindMap()
+		# self.buildKindMap()
 		# print "Variables:", self.variables
 		# print "Globals:", self.globals
 		# print "Declarations:", self.declarations
@@ -189,7 +189,7 @@ class Function(Object):
 		node.__eq__ = types.MethodType(eq, node)
 		node.__cmp__ = types.MethodType(cmp, node)
 
-		if node.kind == clang.cindex.CursorKind.DECL_REF_EXPR:
+		if node.kind == ci.CursorKind.DECL_REF_EXPR:
 			if self.variables.get(node.displayname, None) == None:
 				if self.declarations.get(node.displayname, None) == None or self.globals.get(node.displayname, None) == None:
 					# print "UNDEFINED: %s" % (node.displayname)
@@ -197,9 +197,9 @@ class Function(Object):
 			else:
 				self.variables[node.displayname].append(kind_path_copy)
 				self.variables[node.displayname]
-		elif node.kind == clang.cindex.CursorKind.VAR_DECL:
+		elif node.kind == ci.CursorKind.VAR_DECL:
 			self.variables[node.displayname] = list()
-		elif node.kind == clang.cindex.CursorKind.CALL_EXPR:
+		elif node.kind == ci.CursorKind.CALL_EXPR:
 			pass
 
 
@@ -223,7 +223,6 @@ class Function(Object):
 		
 	def structuralDiff(self, other, mode, changed=False):
 		if mode == Mode.Old and other is not None and changed is False:
-			logging.info("swapping")
 			return other.structuralDiff(self, mode, True)
 
 		result = []
@@ -231,22 +230,51 @@ class Function(Object):
 			result.append((Color.Same, char))
 
 		if other is not None:
-			# self.__structuralDiff(self.node, other, other.node, mode, result, 0)
+			self.matchVariables(other)
+
+		if other is not None:
 			self.diff(self.node, other.node, mode, result)
+		else:
+			self.color(self.node, mode, result)
 		return result
 
 
 	def color(self, node, mode, result):
 		if len(node.text) > 0:
 			for i in xrange(node.extent.start.offset, node.extent.end.offset):
-				# logging.info("%s, %s, %s" % (i, node.extent.start.offset, len(node.text)))
 				char = node.text[i - node.extent.start.offset]
 				result[i - self._start_offset] = (ModeToColor[mode], char)
 
 
+	def matchVariables(self, other):
+		self.variablesMatched = dict()
+		for var, positions in other.variables.iteritems():
+			if var not in self.variables:
+				possible = None
+				possible_value = 0.0
+				for new, new_positions in self.variables.iteritems():
+
+					similarity_val = 0.0
+					for i in xrange(0, len(positions)):
+						similarity_val += similarity(positions[i], new_positions[i])
+					similarity_val = similarity_val / len(positions)
+
+					if similarity_val > possible_value:
+						possible = new
+						possible_value = similarity_val
+				if possible != None:
+					self.variablesMatched[possible] = var
+					logging.info("matched %s -> %s" % (var, possible))
+				else:
+					logging.info("cannot match: %s" % var)
+			else:
+				logging.info("matched direct %s -> %s" % (var, var))
+				self.variablesMatched[var] = var
+
+
 	# assume same kind
 	def diffStmts(self, node, other, mode, result):
-		if node.kind == clang.cindex.CursorKind.COMPOUND_STMT:
+		if node.kind == ci.CursorKind.COMPOUND_STMT:
 			for a, b in matchStmts(node, other).iteritems():
 				if b is None:
 					self.color(a, mode, result)
@@ -262,39 +290,61 @@ class Function(Object):
 		if node.kind != other.kind:
 			self.color(node, mode, result)
 			return
-		if clang.cindex.CursorKind.is_statement(node.kind):
+		if ci.CursorKind.is_statement(node.kind):
 			self.diffStmts(node, other, mode, result)
-		elif clang.cindex.CursorKind.is_expression(node.kind):
+		elif ci.CursorKind.is_expression(node.kind):
 			self.diffExpr(node, other, mode, result)
+		elif ci.CursorKind.is_declaration(node.kind):
+			self.diffDecl(node, other, mode, result)
 		else:
 			self.diffAny(node, other, mode, result)
 
 
 	# assume same kind
 	def diffExpr(self, node, other, mode, result):
-		for a, b in zip(node.children, other.children):
-			if a.kind != b.kind:
-				self.color(a, mode, result)
-			elif a.kind == clang.cindex.CursorKind.DECL_REF_EXPR and a.displayname != b.displayname:
-				self.color(a, mode, result)
-			else:
+		logging.info("diffExpr :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
+		if node.kind in [ci.CursorKind.DECL_REF_EXPR]:
+			if node.displayname != other.displayname:
+				self.color(node, mode, result)
+		elif node.kind in [
+			ci.CursorKind.INTEGER_LITERAL, ci.CursorKind.INTEGER_LITERAL, ci.CursorKind.FLOATING_LITERAL,
+			ci.CursorKind.IMAGINARY_LITERAL, ci.CursorKind.STRING_LITERAL, ci.CursorKind.CHARACTER_LITERAL]:
+			if node.text != other.text:
+				self.color(node, mode, result)
+
+		else:
+			for a, b in zip(node.children, other.children):
 				self.diff(a, b, mode, result)
 
+	def diffDecl(self, node, other, mode, result):
+		logging.info("diffDecl :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
+		if node.kind in [ci.CursorKind.VAR_DECL]:
+			if node.displayname != other.displayname:
+				self.color(node, mode, result)
+			else:
+				for a, b in zip(node.children, other.children):
+					self.diff(a, b, mode, result)
+		else:
+			for a, b in zip(node.children, other.children):
+				self.diff(a, b, mode, result)
 
 	def diffAny(self, node, other, mode, result):
-		for a, b in zip(node.children, other.children):
-			if a.kind != b.kind:
-				self.color(a, mode, result)
-			else:
+		logging.info("diffAny :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
+		if node.kind != other.kind:
+			self.color(node, mode, result)
+		else:
+			for a, b in zip(node.children, other.children):
 				self.diff(a, b, mode, result)
 
 
+# TODO: fix bug with 2 exactly same statements
 def matchStmts(node, other):
 	matched = dict()
-	logging.info("MATCHING STATEMENTS STARTED")
 	for c in node.children:
 		possible = dict()
 		for b in other.children:
+			if c.kind != b.kind:
+				continue
 			score = compareStruct(c, b)
 			foundbetter = False
 			for k, v in matched.iteritems():
@@ -302,7 +352,7 @@ def matchStmts(node, other):
 				if s is not None:
 					if s < score:
 						v.pop(b)
-					else:
+					elif s > score:
 						foundbetter = True
 			if not foundbetter:
 				possible[b] = score
@@ -321,21 +371,26 @@ def matchStmts(node, other):
 	for k, v in result.iteritems():
 		if v is not None:
 			logging.info("%s::%s -> %s::%s" % (k.kind, k.text, v.kind, v.text))
-
-	logging.info("MATCHING STATEMENTS FINISHED")
+		else:
+			logging.info("%s::%s -> None" % (k.kind, k.text))
 
 	return result
 
 
-def compareStruct(a, b):
+def compareStruct(a, b, debug=False):
+	if debug:
+		logging.info("compare (%s :: %s) with (%s :: %s)" %(a.kind, a.text, b.kind, b.text))
+		logging.info("%s" % a.children)
 	totalScore = 0.0
 	if a.kind != b.kind:
+		if debug:
+			logging.info("%s, %s" % (a.kind, b.kind))
 		return totalScore
 	totalScore += 1.0
-	if a.displayname == b.displayname:
+	if a.displayname != "" and a.displayname == b.displayname:
 		totalScore += 1.0
 
-	if a.kind == clang.cindex.CursorKind.COMPOUND_STMT:
+	if a.kind == ci.CursorKind.COMPOUND_STMT:
 		for c in a.children:
 			bestScore = 0.0
 			for c_b in b.children:
@@ -346,10 +401,18 @@ def compareStruct(a, b):
 					totalScore += score
 	else:
 		for c, c_b in zip(a.children, b.children):
-			totalScore += compareStruct(c, c_b)
+			totalScore += compareStruct(c, c_b, debug)
 
 	return totalScore
 
+
+def similarity(pathA, pathB):
+	z = zip(pathA, pathB)
+	s = 0.0
+	for a, b in z:
+		if a == b:
+			s += 1
+	return s * 100/len(z)
 
 # Parsers
 
@@ -361,14 +424,13 @@ class GitParser(object):
 		self.repoPath = repoPath
 		self.repo = git.Repo(repoPath)
 
+
 	def collectObjects(self, revision):
-		for i in self.repo.commit(revision).tree.traverse():
-			originalFilePath = os.path.relpath(i.abspath, self.repoPath)
-			basename, ext = os.path.splitext(originalFilePath)
+		self.repo.git.checkout(revision)
+		for i in self.repo.tree().traverse():
+			basename, ext = os.path.splitext(i.abspath)
 			if ext in ['.cpp', '.c', '.cxx']:
-				with open(GitParser.__workFilePath % ext, 'w') as workFile:
-					workFile.write(self.repo.git.show('%s:%s' % (revision, originalFilePath)).encode('utf-8'))
-				yield originalFilePath, GitParser.__workFilePath % ext
+				yield i.abspath
 
 	def getRevisions(self, branch):
 		head = self.repo.commit(branch)
@@ -396,7 +458,7 @@ class CParser(object):
 		self.globals = dict()
 
 	def parse(self):
-		index = clang.cindex.Index.create()
+		index = ci.Index.create()
 		self.filetext = self.file.read()
 		tu = index.parse(self.filePath)
 		self.traverse(tu.cursor)
@@ -404,21 +466,20 @@ class CParser(object):
 		return self.functions, self.classes
 		
 	def traverse(self, node, kind_path=[]):
-		# print "\t"*len(kind_path), node.kind, node.displayname
 		kind_path_copy = list(kind_path)
 		kind_path_copy.append(node.kind)
-		if node.kind in [clang.cindex.CursorKind.FUNCTION_DECL, clang.cindex.CursorKind.CONSTRUCTOR, clang.cindex.CursorKind.CXX_METHOD]:
+		if node.kind in [ci.CursorKind.FUNCTION_DECL, ci.CursorKind.CONSTRUCTOR, ci.CursorKind.CXX_METHOD]:
 			if node.is_definition():
 				self.functions.append(Function(node, self.filetext, self.declarations, self.globals))
 				return
 			else:
 				self.declarations[node.displayname] = node
-		# elif node.kind in [clang.cindex.CursorKind.NAMESPACE]:
+		# elif node.kind in [ci.CursorKind.NAMESPACE]:
 		# 	print "\t"*len(kind_path), node.kind, node.displayname
-		elif node.kind in [clang.cindex.CursorKind.VAR_DECL] and node.is_definition():
+		elif node.kind in [ci.CursorKind.VAR_DECL] and node.is_definition():
 			# print ident, node.kind, node.displayname
 			self.globals[node.displayname] = list(kind_path_copy)
-		# elif node.kind == clang.cindex.CursorKind.CLASS_DECL:
+		# elif node.kind == ci.CursorKind.CLASS_DECL:
 		# 	self.classes.append(Function(node, self.file))
 		for children in node.get_children():
 			self.traverse(children, kind_path_copy)
@@ -454,8 +515,6 @@ class History(object):
 			self.head = elem
 		else:
 			pass
-			# print self.data
-			# raise Exception('failed when trying to add %s:%s for %s' % (revision, self.data, self.function.name))
 
 	def getRev(self, revision):
 		if revision in self.tree:
@@ -495,12 +554,10 @@ def createStore(path, branch='master'):
 	storage = Storage()
 	parser = GitParser(path)
 	for revision in parser.getRevisions(branch):
-		for file, tmpFile in parser.collectObjects(revision):
-			# print "Parsing %s" % file
-			functions, classes = CParser(tmpFile).parse()
+		for filePath in parser.collectObjects(revision):
+			functions, classes = CParser(filePath).parse()
 			
 			for function in functions:
-				# print function.show()
 				storage.add(function, revision)
 	return storage
 
