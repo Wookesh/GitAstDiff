@@ -25,7 +25,7 @@ class Mode():
 	Old  = 2
 
 ModeToColor = {
-	Mode.Both: Color.Same,
+	Mode.Both: Color.Marked,
 	Mode.New:  Color.New,
 	Mode.Old:  Color.Removed,
 }
@@ -173,8 +173,8 @@ class Function(Object):
 		self.parse()
 
 	def parse(self):
-		self.__parse(self.node, [self.node.kind])
-		# self.buildKindMap()
+		self.__parse(self.node, [])
+		
 		# print "Variables:", self.variables
 		# print "Globals:", self.globals
 		# print "Declarations:", self.declarations
@@ -206,20 +206,6 @@ class Function(Object):
 		for c in node.children:
 			self.__parse(c, kind_path_copy)
 
-
-	def buildKindMap(self):
-		self.kindMap = dict()	
-		def __buildKindMap(node, skip=False):
-			if not skip:
-				if self.kindMap.get(node.kind, None) == None:
-					self.kindMap[node.kind] = list()
-				self.kindMap[node.kind].append(node)
-			for c in node.children:
-				__buildKindMap(c)
-
-		__buildKindMap(self.node, skip=True)
-		print self.kindMap, "\n"
-
 		
 	def structuralDiff(self, other, mode, changed=False):
 		if mode == Mode.Old and other is not None and changed is False:
@@ -248,22 +234,20 @@ class Function(Object):
 
 	def matchVariables(self, other):
 		self.variablesMatched = dict()
-		for var, positions in other.variables.iteritems():
-			if var not in self.variables:
+		for var, positions in self.variables.iteritems():
+			if var not in other.variables:
 				possible = None
 				possible_value = 0.0
-				for new, new_positions in self.variables.iteritems():
+				for new, new_positions in other.variables.iteritems():
 
-					similarity_val = 0.0
-					for i in xrange(0, len(positions)):
-						similarity_val += similarity(positions[i], new_positions[i])
-					similarity_val = similarity_val / len(positions)
+					similarity_val = comapreVarPositions(positions, new_positions)
+					logging.info("VARSCORE: %s -> %s :: %s" % (var, new, similarity_val))
 
 					if similarity_val > possible_value:
 						possible = new
 						possible_value = similarity_val
 				if possible != None:
-					self.variablesMatched[possible] = var
+					self.variablesMatched[var] = possible
 					logging.info("matched %s -> %s" % (var, possible))
 				else:
 					logging.info("cannot match: %s" % var)
@@ -305,7 +289,10 @@ class Function(Object):
 		logging.info("diffExpr :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
 		if node.kind in [ci.CursorKind.DECL_REF_EXPR]:
 			if node.displayname != other.displayname:
-				self.color(node, mode, result)
+				if self.variablesMatched.get(node.displayname, None) == other.displayname:
+					self.color(node, Mode.Both, result)
+				else:
+					self.color(node, mode, result)
 		elif node.kind in [
 			ci.CursorKind.INTEGER_LITERAL, ci.CursorKind.INTEGER_LITERAL, ci.CursorKind.FLOATING_LITERAL,
 			ci.CursorKind.IMAGINARY_LITERAL, ci.CursorKind.STRING_LITERAL, ci.CursorKind.CHARACTER_LITERAL]:
@@ -320,7 +307,10 @@ class Function(Object):
 		logging.info("diffDecl :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
 		if node.kind in [ci.CursorKind.VAR_DECL]:
 			if node.displayname != other.displayname:
-				self.color(node, mode, result)
+				if self.variablesMatched.get(node.displayname, None) == other.displayname:
+					self.color(node, Mode.Both, result)
+				else:
+					self.color(node, mode, result)
 			else:
 				for a, b in zip(node.children, other.children):
 					self.diff(a, b, mode, result)
@@ -406,13 +396,20 @@ def compareStruct(a, b, debug=False):
 	return totalScore
 
 
-def similarity(pathA, pathB):
-	z = zip(pathA, pathB)
-	s = 0.0
-	for a, b in z:
-		if a == b:
-			s += 1
-	return s * 100/len(z)
+def comapreVarPositions(a, b):
+	score = 0.0
+	for a_elem in a:
+		for b_elem in b:
+			partialScore = 0.0
+			
+			for i in xrange(0, min(len(a_elem), len(b_elem)) - 1):
+				if a_elem[i] == b_elem[i]:
+					partialScore += 1.0
+			partialScore = partialScore / max(len(a_elem), len(b_elem))
+			score += partialScore
+
+	return score / (len(a) * len(b))
+
 
 # Parsers
 

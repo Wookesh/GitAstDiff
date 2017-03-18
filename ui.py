@@ -57,8 +57,9 @@ class DiffViewer(UIObject):
 		self.gitBarHeight = 10
 
 		self.height, self.width = stdscr.getmaxyx()
-		self.window1 = curses.newwin(self.height - self.gitBarHeight, self.width / 2, self.gitBarHeight, 0)
-		self.window2 = curses.newwin(self.height - self.gitBarHeight, self.width / 2, self.gitBarHeight, self.width / 2)
+		self.window1 = curses.newwin(self.height - self.gitBarHeight, self.width / 2 - 1, self.gitBarHeight, 0)
+		self.window2 = curses.newwin(self.height - self.gitBarHeight, self.width / 2 - 1, self.gitBarHeight, self.width / 2 + 1)
+		self.line = curses.newwin(self.height - self.gitBarHeight, 2, self.gitBarHeight, self.width / 2 - 1)
 		self.gitWindow = curses.newwin(self.gitBarHeight, self.width, 0, 0)
 
 	def __show(self, window, function):
@@ -67,7 +68,7 @@ class DiffViewer(UIObject):
 			window.addstr(0, 0, str(function.revision))
 			lines = []
 			for line in function.function.show().split('\n'):
-				lines += textwrap.wrap(line, self.width / 2)
+				lines += textwrap.wrap(line, self.width / 2 - 1)
 			for i in xrange(0, min(len(lines), self.height - 1)):
 				window.addstr(i + 1, 0, lines[i])
 		window.refresh()
@@ -131,9 +132,16 @@ class DiffViewer(UIObject):
 		self.gitWindow.addstr(4, 0, author.encode(code))
 		self.gitWindow.refresh()
 
+	def __showline(self):
+		self.line.clear()
+		for i in xrange(0, self.height - self.gitBarHeight):
+			self.line.addstr(i, 0, "|")
+		self.line.refresh()
+
 	def show(self):
 		self.__show3(self.window1, self.position, tool.Mode.Old)
 		self.__show3(self.window2, self.position, tool.Mode.New)
+		self.__showline()
 		self.__showGit(self.position)
 
 	def reset(self):
