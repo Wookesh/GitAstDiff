@@ -230,7 +230,7 @@ class Menu(UIObject):
 
 stdscr = None
 
-def run(storage):
+def run(storage, mode):
 	global stdscr
 	stdscr = curses.initscr()
 	curses.noecho()

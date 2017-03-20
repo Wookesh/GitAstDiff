@@ -250,15 +250,19 @@ class Function(Object):
 	# assume same kind
 	def diffStmts(self, node, other, mode, result):
 		logging.info("diffStmt :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
-		if node.kind in [ci.CursorKind.COMPOUND_STMT]:
+		if node.kind in [ci.CursorKind.COMPOUND_STMT, ci.CursorKind.IF_STMT]:
 			for a, b in matchStmts2(node, other).iteritems():
 				if b is None:
 					self.color(a, mode, result)
 				else:
 					self.diffStmts(a, b, mode, result)
 
-		# elif node.kind in [ci.CursorKind.DECL_STMT]:
-		# 	pass
+		elif node.kind in [ci.CursorKind.CALL_EXPR]:
+			if node.displayname != other.displayname:
+				self.color(node, mode, result)
+			else:
+				self.diffChildren(node, other, mode, result)
+			
 		else:
 			z = zip(node.children, other.children)
 			# logging.info("%s, %s, %s", len(node.children), len(other.children), len(z))
@@ -271,6 +275,12 @@ class Function(Object):
 			# 		logging.info("IF_PART_NOT_FOUND %s" % (node.children[i].kind))
 			# 		self.color(node.children[i], mode, result)
 
+	def diffChildren(self, node, other, mode, result):
+		z = zip(node.children, other.children)
+		for a, b in z:
+			self.diff(a, b, mode, result)
+		for i in xrange(len(z), len(node.children)):
+			self.color(node.children[i], mode, result)
 
 	def diff(self, node, other, mode, result):
 		if node.kind != other.kind:
@@ -366,8 +376,14 @@ def matchStmts(node, other):
 	return result
 
 
-def compareTouples((s1, c1, b1), (s2, c2, b2)):
-	return s1 > s2
+def compareTouples(t1, t2):
+	s1, c1, b1 = t1
+	s2, c2, b2 = t2
+	return s1 < s2
+
+def touplekey(t):
+	s, _, _ = t
+	return s
 
 def matchStmts2(node, other):
 	matched = dict()
@@ -384,7 +400,7 @@ def matchStmts2(node, other):
 	for s, c, b in matchingList:
 		logging.info("MATCH_PROP %s -> %s :: %s" % (c.text, b.text, s))
 
-	matchingList = sorted(matchingList, cmp=compareTouples, reverse=True)
+	matchingList = sorted(matchingList, key=touplekey, reverse=True)
 
 	used = set()
 	for e in matchingList:
@@ -403,6 +419,7 @@ def matchStmts2(node, other):
 
 	return matched
 
+# TODO: improve scoring
 def compareStruct(a, b, debug=False):
 	if debug:
 		logging.info("compare (%s :: %s) with (%s :: %s)" %(a.kind, a.text, b.kind, b.text))
@@ -412,8 +429,11 @@ def compareStruct(a, b, debug=False):
 		if debug:
 			logging.info("%s, %s" % (a.kind, b.kind))
 		return totalScore
-	totalScore += 1.0
-	if a.displayname != "" and a.displayname == b.displayname:
+	if a.displayname != "":
+		totalScore += 0.5
+		if a.displayname == b.displayname:
+			totalScore += 0.5
+	else:
 		totalScore += 1.0
 
 	if a.kind == ci.CursorKind.COMPOUND_STMT:
@@ -584,29 +604,35 @@ def getArgs():
 	parser = argparse.ArgumentParser(description='Git Diff Improved')
 	parser.add_argument('path', metavar='path', help='path to repo with c/c++ code')
 	parser.add_argument('branch', metavar='branch', help='branch/tag name of repo to parse')
+	parser.add_argument('--count', '-c', default=-1, type=int)
+	parser.add_argument('--mode', '-m', default='struct')
 
 	return parser.parse_args()
 
 # execute
 
-def createStore(path, branch='master'):
+def createStore(path, branch='master', count=-1):
 	storage = Storage()
 	parser = GitParser(path)
+	counter = 0
 	for revision in parser.getRevisions(branch):
 		for filePath in parser.collectObjects(revision):
 			functions, classes = CParser(filePath).parse()
 			
 			for function in functions:
 				storage.add(function, revision)
+		counter += 1
+		if counter == count:
+			break
 	return storage
 
 
 def main():
 	init()
 	args = getArgs()
-	storage = createStore(args.path, args.branch)
+	storage = createStore(args.path, args.branch, count=args.count)
 
-	ui.run(storage)
+	ui.run(storage, args.mode)
 
 
 if __name__ == '__main__':
