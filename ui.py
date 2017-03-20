@@ -79,7 +79,7 @@ class DiffViewer(UIObject):
 			parent = function.parent.function if function.parent is not None else None
 			window.addstr(0, 0, str(self.position.revision if mode == tool.Mode.New else self.position.parent.revision))
 			lines = []
-			for color, line in function.function.diff(parent, mode):
+			for color, line in function.function.diffLCS(parent, mode):
 				for l in textwrap.wrap(line, self.width):
 					lines.append((color, l))
 			for i in xrange(0, min(len(lines), self.height - self.gitBarHeight - 1)):
@@ -139,8 +139,13 @@ class DiffViewer(UIObject):
 		self.line.refresh()
 
 	def show(self):
-		self.__show3(self.window1, self.position, tool.Mode.Old)
-		self.__show3(self.window2, self.position, tool.Mode.New)
+		global mode
+		if mode == "struct":
+			self.__show3(self.window1, self.position, tool.Mode.Old)
+			self.__show3(self.window2, self.position, tool.Mode.New)
+		else:
+			self.__show2(self.window1, self.position, tool.Mode.Old)
+			self.__show2(self.window2, self.position, tool.Mode.New)
 		self.__showline()
 		self.__showGit(self.position)
 
@@ -229,8 +234,11 @@ class Menu(UIObject):
 
 
 stdscr = None
+mode = ""
 
-def run(storage, mode):
+def run(storage, setup_mode):
+	global mode
+	mode = setup_mode
 	global stdscr
 	stdscr = curses.initscr()
 	curses.noecho()

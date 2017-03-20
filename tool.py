@@ -99,9 +99,7 @@ class Object(object):
 		self.node = node
 		self.name = node.displayname
 		self._start_offset = node.extent.start.offset
-		# sourceFile.seek(self._start_offset)
 		self.prepare(self.node, sourceFile)
-		# self.text = sourceFile.read(node.extent.end.offset - self._start_offset)
 
 	def prepare(self, node, sourceText):
 		node.text = sourceText[node.extent.start.offset:node.extent.end.offset]
@@ -120,10 +118,10 @@ class Object(object):
 		# TODO: Improve
 		return self.name
 
-	def diff(self, other, mode):
+	def diffLCS(self, other, mode):
 		diff = []
-		Y = self.text.split('\n')
-		X = other.text.split('\n') if other is not None else []
+		Y = self.node.text.split('\n')
+		X = other.node.text.split('\n') if other is not None else []
 		C = LCS(X, Y)
 		getDiff(C, X, Y, len(X), len(Y), diff, mode)
 		return diff
