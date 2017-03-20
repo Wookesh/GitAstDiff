@@ -206,11 +206,12 @@ class Function(Object):
 		return result
 
 
-	def color(self, node, mode, result):
+	def color(self, node, mode, result, start=0, stop=0):
 		if len(node.text) > 0:
-			for i in xrange(node.extent.start.offset, node.extent.end.offset):
+			for i in xrange(node.extent.start.offset+start, node.extent.end.offset-stop):
 				char = node.text[i - node.extent.start.offset]
 				result[i - self._start_offset] = (ModeToColor[mode], char)
+
 
 
 	def matchVariables(self, other):
@@ -253,7 +254,7 @@ class Function(Object):
 				if b is None:
 					self.color(a, mode, result)
 				else:
-					self.diffStmts(a, b, mode, result)
+					self.diff(a, b, mode, result)
 
 		elif node.kind in [ci.CursorKind.CALL_EXPR]:
 			if node.displayname != other.displayname:
@@ -282,12 +283,13 @@ class Function(Object):
 
 	def diff(self, node, other, mode, result):
 		if node.kind != other.kind:
+			logging.info("diff :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
 			self.color(node, mode, result)
 			return
-		if ci.CursorKind.is_statement(node.kind):
-			self.diffStmts(node, other, mode, result)
-		elif ci.CursorKind.is_expression(node.kind):
+		if ci.CursorKind.is_expression(node.kind):
 			self.diffExpr(node, other, mode, result)
+		elif ci.CursorKind.is_statement(node.kind):
+			self.diffStmts(node, other, mode, result)
 		elif ci.CursorKind.is_declaration(node.kind):
 			self.diffDecl(node, other, mode, result)
 		else:
@@ -307,6 +309,13 @@ class Function(Object):
 			ci.CursorKind.IMAGINARY_LITERAL, ci.CursorKind.STRING_LITERAL, ci.CursorKind.CHARACTER_LITERAL]:
 			if node.text != other.text:
 				self.color(node, mode, result)
+		elif node.kind in [ci.CursorKind.BINARY_OPERATOR]:
+			operator_a = node.text.rstrip(node.children[1].text).lstrip(node.children[0].text).strip()
+			operator_b = other.text.rstrip(other.children[1].text).lstrip(other.children[0].text).strip()
+			if operator_a != operator_b:
+				self.color(node, mode, result, start=len(node.children[0].text), stop=len(node.children[1].text))
+			for a, b in zip(node.children, other.children):
+				self.diff(a, b, mode, result)
 
 		else:
 			for a, b in zip(node.children, other.children):
