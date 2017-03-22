@@ -149,40 +149,38 @@ class Function(Object):
 	def __init__(self, node, sourceFile, declarations, globals):
 		super(Function, self).__init__(node, sourceFile)
 		self.variables = dict()
+		self.reversedVars = dict()
 		self.declarations = declarations
 		self.globals = globals
 		self.parse()
 
 	def parse(self):
+		for nodeHash, node in self.globals.iteritems():
+			self.variables[nodeHash] = list()
+			self.reversedVars[nodeHash] = node
+
 		self.__parse(self.node, [])
-		
-		# print "Variables:", self.variables
-		# print "Globals:", self.globals
-		# print "Declarations:", self.declarations
 
 
 	def __parse(self, node, kind_path):
 		kind_path_copy = list(kind_path)
 		kind_path_copy.append(node.kind)
-		# print "\t"*len(kind_path), node.kind, node.displayname
 
 		node.__hash__ = types.MethodType(simplehash, node)
 		node.__eq__ = types.MethodType(eq, node)
 		node.__cmp__ = types.MethodType(cmp, node)
 
-		if node.kind == ci.CursorKind.DECL_REF_EXPR:
-			if self.variables.get(node.displayname, None) == None:
-				if self.declarations.get(node.displayname, None) == None or self.globals.get(node.displayname, None) == None:
+		if node.kind in [ci.CursorKind.VAR_DECL, ci.CursorKind.PARM_DECL]:
+			self.variables[node.hash] = list()
+			self.reversedVars[node.hash] = node
+		elif node.kind == ci.CursorKind.DECL_REF_EXPR:
+			definition = node.get_definition()
+			if definition is not None:
+				if self.variables.get(definition.hash, None) is not None:
+					self.variables[definition.hash].append(kind_path_copy)
+			elif self.declarations.get(node.displayname, None) == None or self.globals.get(node.displayname, None) == None:
 					# print "UNDEFINED: %s" % (node.displayname)
 					pass
-			else:
-				self.variables[node.displayname].append(kind_path_copy)
-				self.variables[node.displayname]
-		elif node.kind == ci.CursorKind.VAR_DECL:
-			self.variables[node.displayname] = list()
-		elif node.kind == ci.CursorKind.CALL_EXPR:
-			pass
-
 
 		for c in node.children:
 			self.__parse(c, kind_path_copy)
@@ -197,7 +195,7 @@ class Function(Object):
 			result.append((Color.Same, char))
 
 		if other is not None:
-			self.matchVariables(other)
+			self.matchVars2(other)
 
 		if other is not None:
 			self.diff(self.node, other.node, mode, result)
@@ -217,9 +215,9 @@ class Function(Object):
 	def matchVariables(self, other):
 		self.variablesMatched = dict()
 
-		for var in self.variables.iterkeys():
-			if var in other.variables:
-				self.variablesMatched[var] = var
+		# for var in self.variables.iterkeys():
+		# 	if var in other.variables:
+		# 		self.variablesMatched[var] = var
 
 
 		for var, positions in self.variables.iteritems():
@@ -231,25 +229,56 @@ class Function(Object):
 						continue
 
 					similarity_val = comapreVarPositions(positions, new_positions)
-					logging.info("VARSCORE: %s -> %s :: %s" % (var, new, similarity_val))
 
 					if similarity_val > possible_value:
 						possible = new
 						possible_value = similarity_val
 				if possible != None:
 					self.variablesMatched[var] = possible
-					logging.info("matched %s -> %s" % (var, possible))
+					logging.info("matched %s -> %s" % (self.reversedVars[var].displayname, other.reversedVars[possible].displayname))
 				else:
-					logging.info("cannot match: %s" % var)
+					logging.info("cannot match: %s" % self.reversedVars[var].displayname)
 			else:
-				logging.info("matched direct %s -> %s" % (var, var))
+				logging.info("matched direct %s -> %s" % (self.reversedVars[var].displayname, self.reversedVars[var].displayname))
 				self.variablesMatched[var] = var
+
+	def matchVars2(self, other):
+		matched = dict()
+		matchingList = list()
+		for var, positions in self.variables.iteritems():
+			for new, new_positions in other.variables.iteritems():
+				if len(positions) == 0:
+					continue
+				score = comapreVarPositions(positions, new_positions)
+				matchingList.append((score, var, new))
+
+		for s, c, b in matchingList:
+			logging.info("MATCH_VAR_PROP %s -> %s :: %s" % (self.reversedVars[c].displayname, other.reversedVars[b].displayname, s))
+
+		matchingList = sorted(matchingList, key=touplekey, reverse=True)
+
+		used = set()
+		for e in matchingList:
+			score, c, b = e
+			if b in used:
+				continue
+			if c in matched:
+				continue
+			logging.info("MATCH_VAR_DEC %s -> %s :: %s" % (self.reversedVars[c].displayname, other.reversedVars[b].displayname, score))
+			used.add(b)
+			matched[c] = b
+
+		for c in self.variables.iterkeys():
+			if c not in matched:
+				matched[c] = None
+
+		self.variablesMatched = matched
 
 
 	# assume same kind
 	def diffStmts(self, node, other, mode, result):
 		logging.info("diffStmt :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
-		if node.kind in [ci.CursorKind.COMPOUND_STMT, ci.CursorKind.IF_STMT]:
+		if node.kind in [ci.CursorKind.COMPOUND_STMT, ci.CursorKind.IF_STMT, ci.CursorKind.DECL_STMT]:
 			for a, b in matchStmts2(node, other).iteritems():
 				if b is None:
 					self.color(a, mode, result)
@@ -263,16 +292,7 @@ class Function(Object):
 				self.diffChildren(node, other, mode, result)
 			
 		else:
-			z = zip(node.children, other.children)
-			# logging.info("%s, %s, %s", len(node.children), len(other.children), len(z))
-			for a, b in z:
-				logging.info("STMT_CHLD %s :: %s" % (a.text, b.text))
-				self.diff(a, b, mode, result)
-			# if len(node.children) > len(z):
-			# 	logging.info("I SHOULD PRINT")
-			# 	for i in xrange(len(z), len(node.children)):
-			# 		logging.info("IF_PART_NOT_FOUND %s" % (node.children[i].kind))
-			# 		self.color(node.children[i], mode, result)
+			self.diffChildren(node, other, mode, result)
 
 	def diffChildren(self, node, other, mode, result):
 		z = zip(node.children, other.children)
@@ -300,9 +320,16 @@ class Function(Object):
 		logging.info("diffExpr :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
 		if node.kind in [ci.CursorKind.DECL_REF_EXPR]:
 			if node.displayname != other.displayname:
-				if self.variablesMatched.get(node.displayname, None) == other.displayname:
-					self.color(node, Mode.Both, result)
+				definition = node.get_definition()
+				definition_o = other.get_definition()
+				if definition is not None and definition_o is not None:
+					if self.variablesMatched.get(definition.hash, None) == definition_o.hash:
+						self.color(node, Mode.Both, result)
+					else:
+						logging.info("Eliminated by not found (%s %s), (%s %s)" % (definition.displayname, definition.hash, definition_o.displayname, definition_o.hash))
+						self.color(node, mode, result)
 				else:
+					logging.info("Eliminated by None %s, %s" % (node.displayname, other.displayname))
 					self.color(node, mode, result)
 		elif node.kind in [
 			ci.CursorKind.INTEGER_LITERAL, ci.CursorKind.INTEGER_LITERAL, ci.CursorKind.FLOATING_LITERAL,
@@ -316,24 +343,25 @@ class Function(Object):
 				self.color(node, mode, result, start=len(node.children[0].text), stop=len(node.children[1].text))
 			for a, b in zip(node.children, other.children):
 				self.diff(a, b, mode, result)
-
+		elif node.kind in [ci.CursorKind.CALL_EXPR]:
+			if node.displayname != other.displayname:
+				self.color(node, mode, result)
+			else:
+				self.diffChildren(node, other, mode, result)
 		else:
-			for a, b in zip(node.children, other.children):
-				self.diff(a, b, mode, result)
+			self.diffChildren(node, other, mode, result)
 
 	def diffDecl(self, node, other, mode, result):
 		logging.info("diffDecl :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
 		if node.kind in [ci.CursorKind.VAR_DECL]:
 			if node.displayname != other.displayname:
-				if self.variablesMatched.get(node.displayname, None) == other.displayname:
+				if self.variablesMatched.get(node.hash, None) == other.hash:
 					self.color(node, Mode.Both, result)
 				else:
 					self.color(node, mode, result)
-			for a, b in zip(node.children, other.children):
-				self.diff(a, b, mode, result)
+			self.diffChildren(node, other, mode, result)
 		else:
-			for a, b in zip(node.children, other.children):
-				self.diff(a, b, mode, result)
+			self.diffChildren(node, other, mode, result)
 
 	def diffAny(self, node, other, mode, result):
 		logging.info("diffAny :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
@@ -341,9 +369,8 @@ class Function(Object):
 			self.diff(a, b, mode, result)
 
 
-# TODO: fix bug with 2 exactly same statements
+# TODO:
 #       find nested
-
 def matchStmts(node, other):
 	matched = dict()
 	for c in node.children:
@@ -401,7 +428,8 @@ def matchStmts2(node, other):
 			if c.kind != b.kind:
 				continue
 			b_size = getSize(b)
-			score = compareStruct(c, b) / max(c_size, b_size)
+			score = compareStruct(c, b)
+			score = score / (c_size + b_size - score)
 			matchingList.append((score, c, b))
 
 	for s, c, b in matchingList:
@@ -466,12 +494,12 @@ def comapreVarPositions(a, b):
 			partialScore = 0.0
 			
 			for i in xrange(0, min(len(a_elem), len(b_elem)) - 1):
-				if a_elem[i] == b_elem[i]:
+				if i > 2 and a_elem[i] == b_elem[i]:
 					partialScore += 1.0
 			partialScore = partialScore / max(len(a_elem), len(b_elem))
 			score += partialScore
 
-	return score / (len(a) * len(b))
+	return score / ((len(a) * len(b)) + 1)
 
 
 def getSize(node):
@@ -534,6 +562,7 @@ class CParser(object):
 	def traverse(self, node, kind_path=[]):
 		kind_path_copy = list(kind_path)
 		kind_path_copy.append(node.kind)
+		# print "\t" * len(kind_path), node.kind, node.displayname
 		if node.kind in [ci.CursorKind.FUNCTION_DECL, ci.CursorKind.CONSTRUCTOR, ci.CursorKind.CXX_METHOD]:
 			if node.is_definition():
 				self.functions.append(Function(node, self.filetext, self.declarations, self.globals))
@@ -542,9 +571,8 @@ class CParser(object):
 				self.declarations[node.displayname] = node
 		# elif node.kind in [ci.CursorKind.NAMESPACE]:
 		# 	print "\t"*len(kind_path), node.kind, node.displayname
-		elif node.kind in [ci.CursorKind.VAR_DECL] and node.is_definition():
-			# print ident, node.kind, node.displayname
-			self.globals[node.displayname] = list(kind_path_copy)
+		elif node.kind in [ci.CursorKind.VAR_DECL]:
+			self.globals[node.hash] = node
 		# elif node.kind == ci.CursorKind.CLASS_DECL:
 		# 	self.classes.append(Function(node, self.file))
 		for children in node.get_children():
