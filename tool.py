@@ -472,14 +472,18 @@ def compareStruct(a, b, debug=False):
 		totalScore += 1.0
 
 	if a.kind == ci.CursorKind.COMPOUND_STMT:
-		for c in a.children:
-			bestScore = 0.0
-			for c_b in b.children:
-				if c.kind == c_b.kind:
-					score = compareStruct(c, c_b)
-					if score > bestScore:
-						bestScore = score
-					totalScore += score
+		matched = matchStmts2(a, b)
+		for a, b in matched.iteritems():
+			if b is not None:
+				totalScore += compareStruct(a, b)
+		# for c in a.children:
+		# 	bestScore = 0.0
+		# 	for c_b in b.children:
+		# 		if c.kind == c_b.kind:
+		# 			score = compareStruct(c, c_b)
+		# 			if score > bestScore:
+		# 				bestScore = score
+		# 			totalScore += score
 	else:
 		for c, c_b in zip(a.children, b.children):
 			totalScore += compareStruct(c, c_b, debug)
@@ -492,14 +496,20 @@ def comapreVarPositions(a, b):
 	for a_elem in a:
 		for b_elem in b:
 			partialScore = 0.0
-			
-			for i in xrange(0, min(len(a_elem), len(b_elem)) - 1):
-				if i > 2 and a_elem[i] == b_elem[i]:
-					partialScore += 1.0
-			partialScore = partialScore / max(len(a_elem), len(b_elem))
-			score += partialScore
+			import difflib
 
-	return score / ((len(a) * len(b)) + 1)
+			partialScore = difflib.SequenceMatcher(None, a_elem, b_elem)
+			
+			# for i in xrange(0, min(len(a_elem), len(b_elem)) - 1):
+			# 	if i > 2 and a_elem[i] == b_elem[i]:
+			# 		partialScore += 1.0
+			# partialScore = partialScore / (len(a_elem) +  len(b_elem) - partialScore)
+			score += partialScore.ratio()
+
+	if len(a) == 0 or len(b) == 0:
+		return 0.0
+
+	return score / ((len(a) * len(b)))
 
 
 def getSize(node):

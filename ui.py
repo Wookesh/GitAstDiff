@@ -100,7 +100,7 @@ class DiffViewer(UIObject):
 				if letter == '\n':
 					lastLine = lastLine + 1
 					text.append(list())
-			for i in xrange(0, min(len(text), self.height - self.gitBarHeight - 1)):
+			for i in xrange(0, min(len(text), self.height - self.gitBarHeight - 5)): #TODO: FIX MAGIC 5
 				line = text[i]
 				for j in xrange(0, len(line)):
 					color, char = line[j]
