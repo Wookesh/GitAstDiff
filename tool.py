@@ -211,37 +211,6 @@ class Function(Object):
 				result[i - self._start_offset] = (ModeToColor[mode], char)
 
 
-
-	def matchVariables(self, other):
-		self.variablesMatched = dict()
-
-		# for var in self.variables.iterkeys():
-		# 	if var in other.variables:
-		# 		self.variablesMatched[var] = var
-
-
-		for var, positions in self.variables.iteritems():
-			if var not in other.variables:
-				possible = None
-				possible_value = 0.0
-				for new, new_positions in other.variables.iteritems():
-					if new in self.variablesMatched:
-						continue
-
-					similarity_val = comapreVarPositions(positions, new_positions)
-
-					if similarity_val > possible_value:
-						possible = new
-						possible_value = similarity_val
-				if possible != None:
-					self.variablesMatched[var] = possible
-					logging.info("matched %s -> %s" % (self.reversedVars[var].displayname, other.reversedVars[possible].displayname))
-				else:
-					logging.info("cannot match: %s" % self.reversedVars[var].displayname)
-			else:
-				logging.info("matched direct %s -> %s" % (self.reversedVars[var].displayname, self.reversedVars[var].displayname))
-				self.variablesMatched[var] = var
-
 	def matchVars2(self, other):
 		matched = dict()
 		matchingList = list()
@@ -369,47 +338,6 @@ class Function(Object):
 			self.diff(a, b, mode, result)
 
 
-# TODO:
-#       find nested
-def matchStmts(node, other):
-	matched = dict()
-	for c in node.children:
-		possible = dict()
-		for b in other.children:
-			if c.kind != b.kind:
-				continue
-			score = compareStruct(c, b)
-			foundbetter = False
-			for k, v in matched.iteritems():
-				s = v.get(b, None)
-				if s is not None:
-					if s < score:
-						v.pop(b)
-					elif s > score:
-						foundbetter = True
-			if not foundbetter:
-				possible[b] = score
-		matched[c] = possible
-
-	result = dict()
-	for c, elems in matched.iteritems():
-		best = None
-		bestScore = 0.0
-		for k, v in elems.iteritems():
-			if v >= bestScore:
-				bestScore = v
-				best = k
-		result[c] = best
-
-	for k, v in result.iteritems():
-		if v is not None:
-			logging.info("%s::%s -> %s::%s" % (k.kind, k.text, v.kind, v.text))
-		else:
-			logging.info("%s::%s -> None" % (k.kind, k.text))
-
-	return result
-
-
 def compareTouples(t1, t2):
 	s1, c1, b1 = t1
 	s2, c2, b2 = t2
@@ -476,14 +404,6 @@ def compareStruct(a, b, debug=False):
 		for a, b in matched.iteritems():
 			if b is not None:
 				totalScore += compareStruct(a, b)
-		# for c in a.children:
-		# 	bestScore = 0.0
-		# 	for c_b in b.children:
-		# 		if c.kind == c_b.kind:
-		# 			score = compareStruct(c, c_b)
-		# 			if score > bestScore:
-		# 				bestScore = score
-		# 			totalScore += score
 	else:
 		for c, c_b in zip(a.children, b.children):
 			totalScore += compareStruct(c, c_b, debug)
@@ -499,11 +419,7 @@ def comapreVarPositions(a, b):
 			import difflib
 
 			partialScore = difflib.SequenceMatcher(None, a_elem, b_elem)
-			
-			# for i in xrange(0, min(len(a_elem), len(b_elem)) - 1):
-			# 	if i > 2 and a_elem[i] == b_elem[i]:
-			# 		partialScore += 1.0
-			# partialScore = partialScore / (len(a_elem) +  len(b_elem) - partialScore)
+
 			score += partialScore.ratio()
 
 	if len(a) == 0 or len(b) == 0:
