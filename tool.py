@@ -16,7 +16,7 @@ class Color(object):
 	Same	= 0
 	Removed = 1
 	New	    = 2
-	Marked  = 3
+	Marked  = 4
 	# Differ  = 4
 
 class Mode():
