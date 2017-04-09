@@ -95,13 +95,13 @@ def desc(node, tab=""):
 
 class Object(object):
 
-	def __init__(self, node, sourceFile):
+	def __init__(self, node, name, sourceFile):
 		self.node = node
-		self.name = node.displayname
+		self.name = name
 		self._start_offset = node.extent.start.offset
 		self.prepare(self.node, sourceFile)
 
-	def prepare(self, node, sourceText):
+	def prepare(self, node, sourceText):	
 		node.text = sourceText[node.extent.start.offset:node.extent.end.offset]
 		node.children = []
 		for child in node.get_children():
@@ -146,8 +146,8 @@ ci.Cursor.__hash__ = simplehash
 
 class Function(Object):
 
-	def __init__(self, node, sourceFile, declarations, globals):
-		super(Function, self).__init__(node, sourceFile)
+	def __init__(self, node, name, sourceFile, declarations, globals):
+		super(Function, self).__init__(node, name, sourceFile)
 		self.variables = dict()
 		self.reversedVars = dict()
 		self.declarations = declarations
@@ -211,14 +211,8 @@ class Function(Object):
 				result[i - self._start_offset] = (ModeToColor[mode], char)
 
 
-
 	def matchVariables(self, other):
 		self.variablesMatched = dict()
-
-		# for var in self.variables.iterkeys():
-		# 	if var in other.variables:
-		# 		self.variablesMatched[var] = var
-
 
 		for var, positions in self.variables.iteritems():
 			if var not in other.variables:
@@ -523,7 +517,7 @@ class GitParser(object):
 		self.repo.git.checkout(revision)
 		for i in self.repo.tree().traverse():
 			basename, ext = os.path.splitext(i.abspath)
-			if ext in ['.cpp', '.c', '.cxx']:
+			if ext in ['.cpp', '.c', '.cxx', '.h', '.hpp', '.hxx']:
 				yield i.abspath
 
 	def getRevisions(self, branch):
@@ -554,29 +548,38 @@ class CParser(object):
 	def parse(self):
 		index = ci.Index.create()
 		self.filetext = self.file.read()
-		tu = index.parse(self.filePath)
+		tu = index.parse(self.filePath, args=['-std=c++11'])
 		self.traverse(tu.cursor)
 		self.file.close()
 		return self.functions, self.classes
 		
-	def traverse(self, node, kind_path=[]):
+	def traverse(self, node, kind_path=[], name_prefix="", debug=False):
 		kind_path_copy = list(kind_path)
 		kind_path_copy.append(node.kind)
-		# print "\t" * len(kind_path), node.kind, node.displayname
-		if node.kind in [ci.CursorKind.FUNCTION_DECL, ci.CursorKind.CONSTRUCTOR, ci.CursorKind.CXX_METHOD]:
-			if node.is_definition():
-				self.functions.append(Function(node, self.filetext, self.declarations, self.globals))
+		if debug:
+			print "\t" * len(kind_path), node.kind, node.displayname
+		if node.kind in [ci.CursorKind.FUNCTION_DECL, ci.CursorKind.CONSTRUCTOR]:
+			if node.is_definition() and os.path.abspath(self.filePath) == os.path.abspath(node.extent.start.file.name):
+				self.functions.append(Function(node, name_prefix + node.displayname, self.filetext, self.declarations, self.globals))
 				return
 			else:
 				self.declarations[node.displayname] = node
-		# elif node.kind in [ci.CursorKind.NAMESPACE]:
-		# 	print "\t"*len(kind_path), node.kind, node.displayname
+				return
+		elif node.kind in [ci.CursorKind.CXX_METHOD]:
+			if node.is_definition() and os.path.abspath(self.filePath) == os.path.abspath(node.extent.start.file.name):
+				self.functions.append(Function(node, node.semantic_parent.displayname + "::" + node.displayname, self.filetext, self.declarations, self.globals))
+				return
+			else:
+				self.declarations[node.displayname] = node
+				return
+		elif node.kind in [ci.CursorKind.NAMESPACE]:
+			if node.displayname == "std" or node.displayname.startswith("_"):
+				return
+			name_prefix = name_prefix + node.displayname + "::"
 		elif node.kind in [ci.CursorKind.VAR_DECL]:
 			self.globals[node.hash] = node
-		# elif node.kind == ci.CursorKind.CLASS_DECL:
-		# 	self.classes.append(Function(node, self.file))
 		for children in node.get_children():
-			self.traverse(children, kind_path_copy)
+			self.traverse(children, kind_path_copy, name_prefix, debug)
 
 
 class History(object):
