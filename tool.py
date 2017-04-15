@@ -536,14 +536,13 @@ class History(object):
 		self.data = dict()
 
 	def insert(self, function, revision, after=None):
-		if revision not in self.data:
-			elem = History.Element(function, revision, self.head)
-			if self.head is not None:
+		elem = History.Element(function, revision, self.head)
+		if self.head is not None:
+			if self.head.function.node.text != elem.function.node.text:
 				self.head.setChild(elem)
-			self.data[revision] = elem
-			self.head = elem
+				self.head = elem
 		else:
-			pass
+			self.head = elem
 
 	def getRev(self, revision):
 		if revision in self.tree:
