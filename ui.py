@@ -89,9 +89,9 @@ class DiffViewer(UIObject):
 
 	def __show3(self, window, function, mode):
 		window.clear()
-		if function is not None and (mode == tool.Mode.New or function.parent is not None):
-			parent = function.parent.function if function.parent is not None else None
-			window.addstr(0, 0, str(self.position.revision if mode == tool.Mode.New else self.position.parent.revision))
+		if function is not None and (mode == tool.Mode.New or len(function.parents) > 0):
+			parent = function.parents[0].function if len(function.parents) > 0 else None
+			window.addstr(0, 0, str(self.position.revision if mode == tool.Mode.New else self.position.parents[0].revision))
 			window.addch('\n')
 			text = [list()]
 			lastLine = 0
@@ -113,13 +113,13 @@ class DiffViewer(UIObject):
 		rev = self.functionHistory.head
 		comment = currentRevision.revision.summary
 		author = currentRevision.revision.author.name + " " + currentRevision.revision.author.email
-		while rev.parent is not None:
+		while len(rev.parents) > 0:
 			if rev == currentRevision:
 				mid.append('O')
 			else:
 				mid.append('*')
 			mid.append('-')
-			rev = rev.parent
+			rev = rev.parents[0]
 		if rev == currentRevision:
 			mid.append('O')
 		else:
@@ -154,12 +154,12 @@ class DiffViewer(UIObject):
 		self.positions = None
 
 	def goToParent(self):
-		if self.position.parent is not None:
-			self.position = self.position.parent
+		if len(self.position.parents) > 0:
+			self.position = self.position.parents[0]
 
 	def goToChild(self):
-		if self.position.child is not None:
-			self.position = self.position.child
+		if len(self.position.children) > 0:
+			self.position = self.position.children[0]
 
 	def run(self, parent, function):
 		self.functionHistory = function

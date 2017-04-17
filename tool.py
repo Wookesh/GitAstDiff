@@ -7,6 +7,7 @@ import os
 import ui
 import logging
 import types
+import Queue
 
 def init():
 	logging.basicConfig(filename="tool.log", level=logging.DEBUG)
@@ -94,7 +95,6 @@ def desc(node, tab=""):
 
 
 class Object(object):
-
 	def __init__(self, node, name, sourceFile):
 		self.node = node
 		self.name = name
@@ -128,9 +128,8 @@ class Object(object):
 
 
 class Class(Object):
-
 	def __init__(self, node, sourceFile):
-		super(Function, self).__init__(node, sourceFile)
+		super(Class, self).__init__(node, sourceFile)
 
 
 def simplehash(self):
@@ -178,7 +177,7 @@ class Function(Object):
 			if definition is not None:
 				if self.variables.get(definition.hash, None) is not None:
 					self.variables[definition.hash].append(kind_path_copy)
-			elif self.declarations.get(node.displayname, None) == None or self.globals.get(node.displayname, None) == None:
+			elif self.declarations.get(node.displayname, None) is None or self.globals.get(node.displayname, None) is None:
 					# print "UNDEFINED: %s" % (node.displayname)
 					pass
 
@@ -452,7 +451,7 @@ class GitParser(object):
 			if ext in ['.cpp', '.c', '.cxx', '.h', '.hpp', '.hxx']:
 				yield i.abspath
 
-	def getRevisions(self, branch):
+	def getRevisions(self, branch, last):
 		head = self.repo.commit(branch)
 		history = list()
 		visited = set()
@@ -465,6 +464,9 @@ class GitParser(object):
 			history.append(rev)
 			queue += rev.parents
 		return reversed(history)
+
+	def getSHA(self, rev):
+		return self.repo.commit(rev)
 
 class CParser(object):
 
@@ -518,14 +520,17 @@ class History(object):
 
 	class Element(object):
 
-		def __init__(self, function, revision, parent=None, child=None):
+		def __init__(self, function, revision):
 			self.function = function
 			self.revision = revision
-			self.parent = parent
-			self.child = child
+			self.parents = []
+			self.children = []
 
 		def setChild(self, child):
-			self.child = child
+			self.children.append(child)
+
+		def setParent(self, parent):
+			self.parents.append(parent)
 
 		def __repr__(self):
 			return "%s:%s\n" % (self.revision, self.function.name)
@@ -533,20 +538,43 @@ class History(object):
 	def __init__(self, functionName):
 		self.function = functionName
 		self.head = None
-		self.data = dict()
+		self.revisions = dict()
 
-	def insert(self, function, revision, after=None):
-		elem = History.Element(function, revision, self.head)
-		if self.head is not None:
-			if self.head.function.node.text != elem.function.node.text:
-				self.head.setChild(elem)
-				self.head = elem
+	def insert(self, function, revision):
+		if revision.hexsha not in self.revisions:
+			elem = History.Element(function, revision)
+			self.revisions[revision.hexsha] = elem
+			for parent in revision.parents:
+				parent_elem = self.revisions.get(parent.hexsha, None)
+				if parent_elem is not None:
+					parent_elem.setChild(elem)
+					elem.setParent(parent_elem)
+
+	def setHead(self, head_rev):
+		if head_rev.hexsha in self.revisions:
+			self.head = self.revisions[head_rev.hexsha]
 		else:
-			self.head = elem
+			raise Exception("no head")
+
+	def clean(self):
+		rev = self.head
+		visited = set()
+		queue = Queue.Queue()
+		queue.put(self.head)
+		while not queue.empty():
+			rev = queue.get()
+			visited.add(rev)
+			newChildren = list()
+			for child in rev.children:
+				if child in visited:
+					newChildren.append(child)
+			rev.children = newChildren
+			for parent in rev.parents:
+				queue.put(parent)
 
 	def getRev(self, revision):
-		if revision in self.tree:
-			return self.data[revision]
+		if revision in self.tree:	
+			return self.revisions[revision]
 		return None
 
 	def __repr__(self):
@@ -559,7 +587,6 @@ class History(object):
 
 
 class Storage(object):
-
 	def __init__(self):
 		self.data = dict()
 
@@ -568,38 +595,45 @@ class Storage(object):
 			self.data[function.hash()] = History(function)
 		self.data[function.hash()].insert(function, revision)
 
+	def clean(self, sha):
+		for function in self.data.itervalues():
+			function.setHead(sha)
+			function.clean()
+
 
 def getArgs():
 	parser = argparse.ArgumentParser(description='Git Diff Improved')
 	parser.add_argument('path', metavar='path', help='path to repo with c/c++ code')
-	parser.add_argument('branch', metavar='branch', help='branch/tag name of repo to parse')
-	parser.add_argument('--count', '-c', default=-1, type=int)
+	parser.add_argument('start_rev', metavar='revision', help='commit to start with (newest)')
+	parser.add_argument('--last', '-l', default=None, help='last commit, initial commit is default')
 	parser.add_argument('--mode', '-m', default='struct')
 
 	return parser.parse_args()
 
 # execute
 
-def createStore(path, branch='master', count=-1):
+def createStore(path, start_rev='master', last=None):
 	storage = Storage()
 	parser = GitParser(path)
-	counter = 0
-	for revision in parser.getRevisions(branch):
+
+	rev_sha = parser.getSHA(start_rev)
+
+	for revision in parser.getRevisions(start_rev, last):
 		for filePath in parser.collectObjects(revision):
 			functions, classes = CParser(filePath).parse()
 			
 			for function in functions:
 				storage.add(function, revision)
-		counter += 1
-		if counter == count:
-			break
+
+	storage.clean(rev_sha)
+
 	return storage
 
 
 def main():
 	init()
 	args = getArgs()
-	storage = createStore(args.path, args.branch, count=args.count)
+	storage = createStore(args.path, args.start_rev, last=args.last)
 
 	ui.run(storage, args.mode)
 
