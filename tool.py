@@ -8,6 +8,7 @@ import ui
 import logging
 import types
 import Queue
+import collections
 
 def init():
 	logging.basicConfig(filename="tool.log", level=logging.DEBUG)
@@ -184,6 +185,11 @@ class Function(Object):
 		for c in node.children:
 			self.__parse(c, kind_path_copy)
 
+	def same(self, other) :
+		logging.info("simpleDiff::%s x %s" % (type(self.node.text), type(other.node.text)))
+		logging.info("simpleDiff::\nA:\n%s\n%s" % (':'.join(x.encode('hex') for x in self.node.text), ':'.join(x.encode('hex') for x in other.node.text)))
+		logging.info("simpleDiff:: DECISION: %s" % (self.node.text == other.node.text))
+		return self.node.text == other.node.text
 		
 	def structuralDiff(self, other, mode, changed=False):
 		if mode == Mode.Old and other is not None and changed is False:
@@ -453,6 +459,8 @@ class GitParser(object):
 
 	def getRevisions(self, branch, last):
 		head = self.repo.commit(branch)
+		if last is not None:
+			last = self.repo.commit(last)
 		history = list()
 		visited = set()
 		queue = [head]
@@ -460,6 +468,8 @@ class GitParser(object):
 			rev = queue.pop()
 			if rev in visited:
 				continue
+			if rev == last:
+				break
 			visited.add(rev)
 			history.append(rev)
 			queue += rev.parents
@@ -557,12 +567,13 @@ class History(object):
 			raise Exception("no head")
 
 	def clean(self):
-		rev = self.head
 		visited = set()
 		queue = Queue.Queue()
 		queue.put(self.head)
 		while not queue.empty():
 			rev = queue.get()
+			if rev in visited:
+				continue
 			visited.add(rev)
 			newChildren = list()
 			for child in rev.children:
@@ -571,6 +582,29 @@ class History(object):
 			rev.children = newChildren
 			for parent in rev.parents:
 				queue.put(parent)
+
+	def removeNoChanges(self):
+		visited = set()
+		queue = Queue.Queue()
+		queue.put(self.head)
+		while not queue.empty():
+			rev = queue.get()
+			if rev in visited:
+				continue
+			visited.add(rev)
+			logging.info("Visit:%s" % (rev.function.node.text))
+			for child in rev.children:
+				logging.info("Child:%s" % (child.function.node.text))
+				if child.function.same(rev.function):
+					logging.info("Dropping")
+					child.parents = [elem for elem in child.parents if elem != rev]
+					child.parents += rev.parents
+					for parent in rev.parents:
+						parent.children = [elem for elem in parent.children if elem != rev]
+						parent.children.append(child)
+			for parent in rev.parents:
+				queue.put(parent)
+
 
 	def getRev(self, revision):
 		if revision in self.tree:	
@@ -599,6 +633,9 @@ class Storage(object):
 		for function in self.data.itervalues():
 			function.setHead(sha)
 			function.clean()
+			function.removeNoChanges()
+		self.ordered_data = collections.OrderedDict(sorted(self.data.items(), key=lambda t: t[0]))
+
 
 
 def getArgs():

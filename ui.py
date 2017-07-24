@@ -248,7 +248,7 @@ def run(storage, setup_mode):
 	try:
 		diffViewer = DiffViewer()
 		options = []
-		for fName, function in storage.data.iteritems():
+		for fName, function in storage.ordered_data.iteritems():
 			options.append(FunctionOption(function, fName, diffViewer))
 		MainMenu = Menu(options)
 		MainMenu.run()
