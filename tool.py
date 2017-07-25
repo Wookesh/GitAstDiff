@@ -611,6 +611,9 @@ class History(object):
 			return self.revisions[revision]
 		return None
 
+	def is_single(self):
+		return len(self.head.parents) == 0
+
 	def __repr__(self):
 		string = ""
 		elem = self.head
@@ -623,19 +626,23 @@ class History(object):
 class Storage(object):
 	def __init__(self):
 		self.data = dict()
+		self.ordered_data = dict()
 
-	def add(self, function, revision):
-		if function.hash() not in self.data:
-			self.data[function.hash()] = History(function)
-		self.data[function.hash()].insert(function, revision)
+	def add(self, func, revision):
+		if func.hash() not in self.data:
+			self.data[func.hash()] = History(func)
+		self.data[func.hash()].insert(func, revision)
 
 	def clean(self, sha):
-		for function in self.data.itervalues():
-			function.setHead(sha)
-			function.clean()
-			function.removeNoChanges()
-		self.ordered_data = collections.OrderedDict(sorted(self.data.items(), key=lambda t: t[0]))
-
+		for func in self.data.itervalues():
+			func.setHead(sha)
+			func.clean()
+			func.removeNoChanges()
+		result = collections.OrderedDict()
+		for k, v in self.data.items():
+			if not v.is_single():
+				result[k] = v
+		self.ordered_data = result
 
 
 def getArgs():
