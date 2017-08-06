@@ -9,6 +9,7 @@ import logging
 import types
 import Queue
 import collections
+import stats
 
 def init():
 	logging.basicConfig(filename="tool.log", level=logging.DEBUG)
@@ -102,8 +103,16 @@ class Object(object):
 		self._start_offset = node.extent.start.offset
 		self.prepare(self.node, sourceFile)
 
-	def prepare(self, node, sourceText):	
-		node.text = sourceText[node.extent.start.offset:node.extent.end.offset]
+
+	def prepare(self, node, sourceText):
+		global mode
+		if mode == 'struct':
+			node.text = sourceText[node.extent.start.offset:node.extent.end.offset]
+		if getattr(node, 'text', None) is None:
+			node.text = sourceText[node.extent.start.offset:node.extent.end.offset]
+			# from pprint import pprint
+			# pprint(vars(node))
+			# raise Exception(node)
 		node.children = []
 		for child in node.get_children():
 			node.children.append(child)
@@ -450,29 +459,43 @@ class GitParser(object):
 		self.repo = git.Repo(repoPath)
 
 
-	def collectObjects(self, revision):
+	def collectObjects(self, revision, last):
 		self.repo.git.checkout(revision)
+		# if len(self.repo.head.commit.parents) > 0 and revision.name_rev.split()[0] != last:
+		# 	for diff in self.repo.head.commit.tree.diff(self.repo.head.commit.parents[0]):
+		# 		print diff, diff.deleted_file, diff.a_path, diff.b_path, diff.new_file
+		# 		if diff.new_file:
+		# 			continue
+		# 		basename, ext = os.path.splitext(self.repo.working_dir + '/' + diff.a_path)
+		# 		if ext in ['.C', '.cpp', '.cp', '.c', '.cxx', '.cc', '.c++', '.h', '.hpp', '.hxx']:
+		# 			yield self.repo.working_dir + '/' + diff.a_path
+		# else:
 		for i in self.repo.tree().traverse():
 			basename, ext = os.path.splitext(i.abspath)
-			if ext in ['.cpp', '.c', '.cxx', '.h', '.hpp', '.hxx']:
+			if ext in ['.C', '.cpp', '.cp', '.c', '.cxx', '.cc', '.c++', '.h', '.hpp', '.hxx']:
 				yield i.abspath
 
 	def getRevisions(self, branch, last):
 		head = self.repo.commit(branch)
 		if last is not None:
 			last = self.repo.commit(last)
-		history = list()
 		visited = set()
-		queue = [head]
-		while queue:
-			rev = queue.pop()
+		queue = Queue.Queue()
+		queue.put([head])
+		history = []
+		while not queue.empty():
+			path = queue.get()
+			rev = path[-1]
 			if rev in visited:
 				continue
-			if rev == last:
-				break
 			visited.add(rev)
-			history.append(rev)
-			queue += rev.parents
+			if rev == last:
+				return reversed(path)
+			for parent in rev.parents:
+				new_path = path[:]
+				new_path.append(parent)
+				queue.put(new_path)
+			history = path
 		return reversed(history)
 
 	def getSHA(self, rev):
@@ -511,7 +534,7 @@ class CParser(object):
 				return
 		elif node.kind in [ci.CursorKind.CXX_METHOD]:
 			if node.is_definition() and os.path.abspath(self.filePath) == os.path.abspath(node.extent.start.file.name):
-				self.functions.append(Function(node, node.semantic_parent.displayname + "::" + node.displayname, self.filetext, self.declarations, self.globals))
+				self.functions.append(Function(node, name_prefix + node.semantic_parent.displayname + "::" + node.displayname, self.filetext, self.declarations, self.globals))
 				return
 			else:
 				self.declarations[node.displayname] = node
@@ -522,6 +545,7 @@ class CParser(object):
 			name_prefix = name_prefix + node.displayname + "::"
 		elif node.kind in [ci.CursorKind.VAR_DECL]:
 			self.globals[node.hash] = node
+
 		for children in node.get_children():
 			self.traverse(children, kind_path_copy, name_prefix, debug)
 
@@ -564,7 +588,9 @@ class History(object):
 		if head_rev.hexsha in self.revisions:
 			self.head = self.revisions[head_rev.hexsha]
 		else:
-			raise Exception("no head")
+			print("no head", head_rev, self.function.name)
+			# raise Exception("no head", head_rev, self.revisions)
+
 
 	def clean(self):
 		visited = set()
@@ -592,9 +618,9 @@ class History(object):
 			if rev in visited:
 				continue
 			visited.add(rev)
-			logging.info("Visit:%s" % (rev.function.node.text))
+			logging.info("Visit:%s" % rev.function.node.text)
 			for child in rev.children:
-				logging.info("Child:%s" % (child.function.node.text))
+				logging.info("Child:%s" % child.function.node.text)
 				if child.function.same(rev.function):
 					logging.info("Dropping")
 					child.parents = [elem for elem in child.parents if elem != rev]
@@ -607,7 +633,7 @@ class History(object):
 
 
 	def getRev(self, revision):
-		if revision in self.tree:	
+		if revision in self.tree:
 			return self.revisions[revision]
 		return None
 
@@ -619,8 +645,115 @@ class History(object):
 		elem = self.head
 		while elem is not None:
 			string += str(elem)
-			elem = elem.parent
+			if len(elem.parents) > 0:
+				elem = elem.parents[0]
+			else:
+				elem = None
 		return string
+
+class History2(object):
+
+	class Element(object):
+
+		def __init__(self, function, revision):
+			self.function = function
+			self.revision = revision
+			self.parents = []
+			self.children = []
+
+		def setChild(self, child):
+			self.children.append(child)
+
+		def setParent(self, parent):
+			self.parents.append(parent)
+
+		def __repr__(self):
+			return "%s:%s\n" % (self.revision, self.function.name)
+
+	def __init__(self, functionName):
+		self.function = functionName
+		self.head = None
+		self.revisions = dict()
+		self.last = None
+		self.changed = False
+
+	def insert(self, function, revision):
+		if revision.hexsha not in self.revisions:
+			if self.last is None or not function.same(self.last.function):
+				elem = History2.Element(function, revision)
+				if self.last is not None:
+					elem.setParent(self.last)
+					self.last.setChild(elem)
+				self.last = elem
+			self.changed = True
+		else:
+			print 'WARN:', 'adding same revision'
+
+	def setHead(self, head_rev):
+		self.head = self.last
+
+	def commit(self):
+		self.changed = False
+
+	def clean(self):
+		visited = set()
+		queue = Queue.Queue()
+		queue.put(self.head)
+		while not queue.empty():
+			rev = queue.get()
+			if rev in visited:
+				continue
+			visited.add(rev)
+			newChildren = list()
+			for child in rev.children:
+				if child in visited:
+					newChildren.append(child)
+			rev.children = newChildren
+			for parent in rev.parents:
+				queue.put(parent)
+
+	def removeNoChanges(self):
+		visited = set()
+		queue = Queue.Queue()
+		queue.put(self.head)
+		while not queue.empty():
+			rev = queue.get()
+			if rev in visited:
+				continue
+			visited.add(rev)
+			logging.info("Visit:%s" % rev.function.node.text)
+			for child in rev.children:
+				logging.info("Child:%s" % child.function.node.text)
+				if child.function.same(rev.function):
+					logging.info("Dropping")
+					child.parents = [elem for elem in child.parents if elem != rev]
+					child.parents += rev.parents
+					for parent in rev.parents:
+						parent.children = [elem for elem in parent.children if elem != rev]
+						parent.children.append(child)
+			for parent in rev.parents:
+				queue.put(parent)
+
+
+	def getRev(self, revision):
+		if revision in self.tree:
+			return self.revisions[revision]
+		return None
+
+	def is_single(self):
+		return len(self.head.parents) == 0
+
+	def __repr__(self):
+		string = ""
+		elem = self.head
+		while elem is not None:
+			string += str(elem)
+			if len(elem.parents) > 0:
+				elem = elem.parents[0]
+			else:
+				elem = None
+		return string
+
 
 
 class Storage(object):
@@ -630,19 +763,26 @@ class Storage(object):
 
 	def add(self, func, revision):
 		if func.hash() not in self.data:
-			self.data[func.hash()] = History(func)
+			self.data[func.hash()] = History2(func)
 		self.data[func.hash()].insert(func, revision)
+
+	def checkRemoved(self, revision):
+		for name, func in self.data.items():
+			if not func.changed:
+				print 'Removing', name
+				del self.data[name]
 
 	def clean(self, sha):
 		for func in self.data.itervalues():
 			func.setHead(sha)
-			func.clean()
-			func.removeNoChanges()
-		result = collections.OrderedDict()
+			if func.head is not None:
+				func.clean()
+				func.removeNoChanges()
+		result = []
 		for k, v in self.data.items():
-			if not v.is_single():
-				result[k] = v
-		self.ordered_data = result
+			if v.head is not None and not v.is_single():
+				result.append((k, v))
+		self.ordered_data = collections.OrderedDict(sorted(result, key=lambda t: t[0]))
 
 
 def getArgs():
@@ -651,6 +791,7 @@ def getArgs():
 	parser.add_argument('start_rev', metavar='revision', help='commit to start with (newest)')
 	parser.add_argument('--last', '-l', default=None, help='last commit, initial commit is default')
 	parser.add_argument('--mode', '-m', default='struct')
+	parser.add_argument('--stats', action='store_true', default=False)
 
 	return parser.parse_args()
 
@@ -663,8 +804,12 @@ def createStore(path, start_rev='master', last=None):
 	rev_sha = parser.getSHA(start_rev)
 
 	for revision in parser.getRevisions(start_rev, last):
-		for filePath in parser.collectObjects(revision):
+		print revision
+		for filePath in parser.collectObjects(revision, last):
 			functions, classes = CParser(filePath).parse()
+			# if revision == rev_sha:
+			# 	for function in functions:
+			# 		print function.name
 			
 			for function in functions:
 				storage.add(function, revision)
@@ -674,10 +819,17 @@ def createStore(path, start_rev='master', last=None):
 	return storage
 
 
+mode = None
+
 def main():
 	init()
 	args = getArgs()
+	global mode
+	mode = args.mode
 	storage = createStore(args.path, args.start_rev, last=args.last)
+	if args.stats:
+		stats.gather_stats(storage, args.path.split("/")[-1], args.start_rev, args.last)
+		return
 
 	ui.run(storage, args.mode)
 

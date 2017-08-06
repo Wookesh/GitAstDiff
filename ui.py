@@ -75,14 +75,14 @@ class DiffViewer(UIObject):
 
 	def __show2(self, window, function, mode):
 		window.clear()
-		if function is not None and (mode == tool.Mode.New or function.parent is not None):
-			parent = function.parent.function if function.parent is not None else None
-			window.addstr(0, 0, str(self.position.revision if mode == tool.Mode.New else self.position.parent.revision))
+		if function is not None and (mode == tool.Mode.New or len(function.parents) > 0):
+			parent = function.parents[0].function if len(function.parents) > 0 else None
+			window.addstr(0, 0, str(self.position.revision if mode == tool.Mode.New else self.position.parents[0].revision))
 			lines = []
 			for color, line in function.function.diffLCS(parent, mode):
 				for l in textwrap.wrap(line, self.width):
 					lines.append((color, l))
-			for i in xrange(0, min(len(lines), self.height - self.gitBarHeight - 1)):
+			for i in xrange(0, min(len(lines), self.height - self.gitBarHeight - 5)):
 				color, line = lines[i]
 				window.addstr(i + 1, 0, line, curses.color_pair(color))
 		window.refresh()
