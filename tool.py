@@ -673,13 +673,16 @@ class History2(object):
 	def __init__(self, functionName):
 		self.function = functionName
 		self.head = None
-		self.revisions = dict()
+		self.revisions = set()
 		self.last = None
 		self.changed = False
 
 	def insert(self, function, revision):
+		# print function.name
 		if revision.hexsha not in self.revisions:
+			self.revisions.add(revision.hexsha)
 			if self.last is None or not function.same(self.last.function):
+				# print('adding', function.name)
 				elem = History2.Element(function, revision)
 				if self.last is not None:
 					elem.setParent(self.last)
@@ -688,6 +691,7 @@ class History2(object):
 			self.changed = True
 		else:
 			print 'WARN:', 'adding same revision'
+			print function.name, self.last.function.name
 
 	def setHead(self, head_rev):
 		self.head = self.last
@@ -775,9 +779,9 @@ class Storage(object):
 	def clean(self, sha):
 		for func in self.data.itervalues():
 			func.setHead(sha)
-			if func.head is not None:
-				func.clean()
-				func.removeNoChanges()
+			# if func.head is not None:
+			# 	func.clean()
+				# func.removeNoChanges()
 		result = []
 		for k, v in self.data.items():
 			if v.head is not None and not v.is_single():
@@ -792,6 +796,7 @@ def getArgs():
 	parser.add_argument('--last', '-l', default=None, help='last commit, initial commit is default')
 	parser.add_argument('--mode', '-m', default='struct')
 	parser.add_argument('--stats', action='store_true', default=False)
+	parser.add_argument('--phase', '-p')
 
 	return parser.parse_args()
 
@@ -803,20 +808,20 @@ def createStore(path, start_rev='master', last=None):
 
 	rev_sha = parser.getSHA(start_rev)
 
+	count = 0
 	for revision in parser.getRevisions(start_rev, last):
+		count += 1
 		print revision
 		for filePath in parser.collectObjects(revision, last):
 			functions, classes = CParser(filePath).parse()
-			# if revision == rev_sha:
-			# 	for function in functions:
-			# 		print function.name
 			
 			for function in functions:
 				storage.add(function, revision)
 
+		storage.checkRemoved(revision)
 	storage.clean(rev_sha)
 
-	return storage
+	return storage, count
 
 
 mode = None
@@ -826,9 +831,9 @@ def main():
 	args = getArgs()
 	global mode
 	mode = args.mode
-	storage = createStore(args.path, args.start_rev, last=args.last)
+	storage, count = createStore(args.path, args.start_rev, last=args.last)
 	if args.stats:
-		stats.gather_stats(storage, args.path.split("/")[-1], args.start_rev, args.last)
+		stats.gather_stats(storage, args.path.split("/")[-1], args.start_rev, args.last, args.phase, count)
 		return
 
 	ui.run(storage, args.mode)

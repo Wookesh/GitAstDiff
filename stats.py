@@ -3,7 +3,7 @@ import redis
 client = redis.StrictRedis()
 
 
-def gather_stats(storage, project, first, last):
+def gather_stats(storage, project, first, last, phase, commits_no):
 	key = ":".join([project, first[:8], last[:8]])
 	count = len(storage.ordered_data)
 	client.hset(key, 'count', count)
@@ -29,4 +29,6 @@ def gather_stats(storage, project, first, last):
 	client.hset(key, 'avg', avg)
 	client.hset(key, 'max', max)
 	client.hset(key, 'min', min)
+	client.hset(key, 'phase', phase)
+	client.hset(key, 'commits', commits_no)
 
