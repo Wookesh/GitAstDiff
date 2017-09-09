@@ -38,7 +38,7 @@ class UIObject(object):
 	def run(self):
 		pass
 
-	def show():
+	def show(self):
 		stdscr.clear()
 		stdscr.addstr(0, 0, "DEFAULT SHOW")
 

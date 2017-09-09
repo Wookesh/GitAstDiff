@@ -1,3 +1,6 @@
 env/
 *.pyc
 *.log
+.idea/
+analize.sh
+logs

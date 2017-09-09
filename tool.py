@@ -51,7 +51,6 @@ def cacheResult(func):
 def LCS(X, Y):
 	m = len(X)
 	n = len(Y)
-	# An (m+1) times (n+1) matrix
 	C = [[0] * (n + 1) for _ in range(m + 1)]
 	for i in range(1, m+1):
 		for j in range(1, n+1):
