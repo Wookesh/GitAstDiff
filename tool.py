@@ -34,20 +34,6 @@ ModeToColor = {
 }
 
 
-scoreComparitionCache = dict()
-def cacheResult(func):
-	def wrapper(*args, **kwargs):
-		node = kwargs['node']
-		o_node = kwargs['o_node']
-		result = scoreComparitionCache.get(node.hash + '' + o_node.hash, None)
-		if result is None:
-			result = func(args, kwargs)
-			scoreComparitionCache[node.hash + '' + o_node.hash] = result
-			return result
-		return result
-	return wrapper
-
-
 def LCS(X, Y):
 	m = len(X)
 	n = len(Y)
@@ -102,16 +88,12 @@ class Object(object):
 		self._start_offset = node.extent.start.offset
 		self.prepare(self.node, sourceFile)
 
-
 	def prepare(self, node, sourceText):
 		global mode
 		if mode == 'struct':
 			node.text = sourceText[node.extent.start.offset:node.extent.end.offset]
 		if getattr(node, 'text', None) is None:
 			node.text = sourceText[node.extent.start.offset:node.extent.end.offset]
-			# from pprint import pprint
-			# pprint(vars(node))
-			# raise Exception(node)
 		node.children = []
 		for child in node.get_children():
 			node.children.append(child)
@@ -161,6 +143,7 @@ class Function(Object):
 		self.declarations = declarations
 		self.globals = globals
 		self.parse()
+		self.variablesMatched = None
 
 	def parse(self):
 		for nodeHash, node in self.globals.iteritems():
@@ -208,7 +191,7 @@ class Function(Object):
 			result.append((Color.Same, char))
 
 		if other is not None:
-			self.matchVars2(other)
+			self.matchVars(other)
 
 		if other is not None:
 			self.diff(self.node, other.node, mode, result)
@@ -224,7 +207,7 @@ class Function(Object):
 				result[i - self._start_offset] = (ModeToColor[mode], char)
 
 
-	def matchVars2(self, other):
+	def matchVars(self, other):
 		matched = dict()
 		matchingList = list()
 		for var, positions in self.variables.iteritems():
