@@ -515,25 +515,25 @@ class CParser(object):
 		index = ci.Index.create()
 		self.filetext = self.file.read()
 		tu = index.parse(self.filePath, args=['-std=c++11'])
-		self.traverse(tu.cursor)
+		self.traverse(tu.cursor, kind_path=[])
 		self.file.close()
 		return self.functions, self.classes
 		
-	def traverse(self, node, kind_path=[], name_prefix="", debug=False):
+	def traverse(self, node, kind_path, name_prefix="", debug=False):
 		kind_path_copy = list(kind_path)
 		kind_path_copy.append(node.kind)
-		if debug:
-			print "\t" * len(kind_path), node.kind, node.displayname
 		if node.kind in [ci.CursorKind.FUNCTION_DECL, ci.CursorKind.CONSTRUCTOR]:
 			if node.is_definition() and os.path.abspath(self.filePath) == os.path.abspath(node.extent.start.file.name):
-				self.functions.append(Function(node, name_prefix + node.displayname, self.filetext, self.declarations, self.globals))
+				name = name_prefix + node.displayname
+				self.functions.append(Function(node, name, self.filetext, self.declarations, self.globals))
 				return
 			else:
 				self.declarations[node.displayname] = node
 				return
 		elif node.kind in [ci.CursorKind.CXX_METHOD]:
 			if node.is_definition() and os.path.abspath(self.filePath) == os.path.abspath(node.extent.start.file.name):
-				self.functions.append(Function(node, name_prefix + node.semantic_parent.displayname + "::" + node.displayname, self.filetext, self.declarations, self.globals))
+				name = name_prefix + node.semantic_parent.displayname + "::" + node.displayname
+				self.functions.append(Function(node, name, self.filetext, self.declarations, self.globals))
 				return
 			else:
 				self.declarations[node.displayname] = node
