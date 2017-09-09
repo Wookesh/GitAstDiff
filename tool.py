@@ -10,6 +10,7 @@ import types
 import Queue
 import collections
 import stats
+import difflib
 
 def init():
 	logging.basicConfig(filename="tool.log", level=logging.DEBUG)
@@ -214,7 +215,7 @@ class Function(Object):
 			for new, new_positions in other.variables.iteritems():
 				if len(positions) == 0:
 					continue
-				score = comapreVarPositions(positions, new_positions)
+				score = compareVarPositions(positions, new_positions)
 				matchingList.append((score, var, new))
 
 		for s, c, b in matchingList:
@@ -407,21 +408,16 @@ def compareStruct(a, b, debug=False):
 	return totalScore
 
 
-def comapreVarPositions(a, b):
+def compareVarPositions(a_positions, b_positions):
 	score = 0.0
-	for a_elem in a:
-		for b_elem in b:
-			partialScore = 0.0
-			import difflib
+	for a_position in a_positions:
+		for b_position in b_positions:
+			score += difflib.SequenceMatcher(None, a_position, b_position).ratio()
 
-			partialScore = difflib.SequenceMatcher(None, a_elem, b_elem)
-
-			score += partialScore.ratio()
-
-	if len(a) == 0 or len(b) == 0:
+	if len(a_positions) == 0 or len(b_positions) == 0:
 		return 0.0
 
-	return score / ((len(a) * len(b)))
+	return score / (len(a_positions) * len(b_positions))
 
 
 def getSize(node):
