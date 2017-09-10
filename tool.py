@@ -245,7 +245,7 @@ class Function(Object):
 	def diffStmts(self, node, other, mode, result):
 		logging.info("diffStmt :: (%s :: %s) -- (%s :: %s)" % (node.kind, node.text, other.kind, other.text))
 		if node.kind in [ci.CursorKind.COMPOUND_STMT, ci.CursorKind.IF_STMT, ci.CursorKind.DECL_STMT]:
-			for a, b in matchStmts2(node, other).iteritems():
+			for a, b in matchStmts(node, other).iteritems():
 				if b is None:
 					self.color(a, mode, result)
 				else:
@@ -344,7 +344,7 @@ def touplekey(t):
 	s, _, _ = t
 	return s
 
-def matchStmts2(node, other):
+def matchStmts(node, other):
 	matched = dict()
 	matchingList = list()
 	for c in node.children:
@@ -380,35 +380,30 @@ def matchStmts2(node, other):
 	return matched
 
 # TODO: improve scoring
-def compareStruct(a, b, debug=False):
-	if debug:
-		logging.info("compare (%s :: %s) with (%s :: %s)" %(a.kind, a.text, b.kind, b.text))
-		logging.info("%s" % a.children)
+def compareStruct(a, b):
 	totalScore = 0.0
 	if a.kind != b.kind:
-		if debug:
-			logging.info("%s, %s" % (a.kind, b.kind))
 		return totalScore
 	if a.displayname != "":
 		totalScore += 0.5
 		if a.displayname == b.displayname:
 			totalScore += 0.5
-	else:
+	elif b.displayname == "":
 		totalScore += 1.0
 
 	if a.kind == ci.CursorKind.COMPOUND_STMT:
-		matched = matchStmts2(a, b)
+		matched = matchStmts(a, b)
 		for a, b in matched.iteritems():
 			if b is not None:
 				totalScore += compareStruct(a, b)
 	else:
 		for c, c_b in zip(a.children, b.children):
-			totalScore += compareStruct(c, c_b, debug)
+			totalScore += compareStruct(c, c_b)
 
 	return totalScore
 
 
-def compareVarPositions(a_positions, b_positions):
+def compareVarPositions2(a_positions, b_positions):
 	score = 0.0
 	for a_position in a_positions:
 		for b_position in b_positions:
@@ -418,6 +413,22 @@ def compareVarPositions(a_positions, b_positions):
 		return 0.0
 
 	return score / (len(a_positions) * len(b_positions))
+
+def compareVarPositions(a_positions, b_positions):
+	score = 0.0
+	if len(a_positions) < len(b_positions):
+		a_positions, b_positions = b_positions, a_positions
+	for a_position in a_positions:
+		partial_max = 0.0
+		for b_position in b_positions:
+			partial = difflib.SequenceMatcher(None, a_position, b_position).ratio()
+			partial_max = max(partial, partial_max)
+		score += partial_max
+
+	if len(a_positions) == 0 or len(b_positions) == 0:
+		return 0.0
+
+	return score / max(len(a_positions), len(b_positions))
 
 
 def getSize(node):
