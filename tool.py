@@ -379,7 +379,6 @@ def matchStmts(node, other):
 
 	return matched
 
-# TODO: improve scoring
 def compareStruct(a, b):
 	totalScore = 0.0
 	if a.kind != b.kind:
@@ -391,7 +390,7 @@ def compareStruct(a, b):
 	elif b.displayname == "":
 		totalScore += 1.0
 
-	if a.kind == ci.CursorKind.COMPOUND_STMT:
+	if a.kind in [ci.CursorKind.COMPOUND_STMT, ci.CursorKind.IF_STMT, ci.CursorKind.DECL_STMT]:
 		matched = matchStmts(a, b)
 		for a, b in matched.iteritems():
 			if b is not None:
